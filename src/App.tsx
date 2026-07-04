@@ -35,6 +35,7 @@ import {
   History,
   Type,
   ImageIcon,
+  ArrowLeft,
   LucideIcon
 } from 'lucide-react';
 import { Category, Product, ProductInstance } from './types';
@@ -377,7 +378,7 @@ function MainApp({ user }: { user: User }) {
   const [isAddingInstanceToExisting, setIsAddingInstanceToExisting] = useState(false);
 
   // --- Setting View States ---
-  const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history'>('menu');
+  const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history' | 'appearance' | 'backup'>('menu');
   const [newCatName, setNewCatName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('sparkles');
   const [activeCategoryForSub, setActiveCategoryForSub] = useState<string | null>(null);
@@ -2785,7 +2786,7 @@ ${categoryOptions}
               <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex justify-end p-0 animate-fade-in">
                 <div className="w-full sm:w-96 bg-stone-50 h-full shadow-2xl flex flex-col animate-slide-in-right pb-safe">
                   <div className="p-4 flex items-center gap-3 border-b border-retro-text/10 bg-white">
-                    <button onClick={() => setSettingsView(null)} className="w-10 h-10 flex flex-col items-center justify-center rounded-xl bg-stone-100 text-retro-text hover:bg-stone-200 transition-colors cursor-pointer">
+                    <button onClick={() => setSettingsView('menu')} className="w-10 h-10 flex flex-col items-center justify-center rounded-xl bg-stone-100 text-retro-text hover:bg-stone-200 transition-colors cursor-pointer">
                       <ArrowLeft className="w-5 h-5" />
                     </button>
                     <h2 className="text-lg font-bold font-display text-retro-text flex-1">外觀設定</h2>
