@@ -3650,10 +3650,10 @@ function ProductCard({
   return (
     <div 
       onClick={() => onViewDetail(product)}
-      className={`py-3.5 pr-4 pl-2.5 sm:pl-3 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 cursor-pointer active:scale-[0.99] group relative ${isArchived ? 'opacity-60 grayscale' : ''}`}
+      className={`py-3.5 pr-4 pl-1.5 sm:pl-2 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 cursor-pointer active:scale-[0.99] group relative ${isArchived ? 'opacity-60 grayscale' : ''}`}
       title="點擊進入商品完整畫面"
     >
-      <div className="flex gap-3 items-center min-w-0 flex-1">
+      <div className="flex gap-2.5 items-center min-w-0 flex-1">
         {/* Thumb */}
         <div className="w-16 h-16 flex-shrink-0 flex items-center justify-center">
           {product.photo ? (
