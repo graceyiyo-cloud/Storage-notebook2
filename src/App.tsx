@@ -186,6 +186,7 @@ function MainApp({ user }: { user: User }) {
         }
 
       } catch (err) {
+        target.value = "";
         console.error('Error loading data', err);
       } finally {
         setIsDataLoaded(true);
@@ -557,7 +558,7 @@ function MainApp({ user }: { user: User }) {
 
   // --- File uploads & Photo Handling ---
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, isFormPhoto: boolean) => {
-    const file = e.target.files?.[0];
+    const file = target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -1847,7 +1848,8 @@ ${categoryOptions}
   };
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const target = e.target;
+    const file = target.files?.[0];
     if (!file) return;
     
     const reader = new FileReader();
@@ -1861,6 +1863,7 @@ ${categoryOptions}
           showToast("資料已成功還原！正在同步至雲端...");
           
           // Force save to localStorage immediately
+          target.value = ""; // clear input
           localStorage.setItem('cosmetics_backup_categories', JSON.stringify(json.categories));
           localStorage.setItem('cosmetics_backup_products', JSON.stringify(json.products));
           
@@ -1875,6 +1878,7 @@ ${categoryOptions}
           showToast("備份檔格式不正確");
         }
       } catch (err) {
+        target.value = "";
         console.error(err);
         showToast("讀取備份檔失敗");
       }
@@ -2888,11 +2892,14 @@ ${categoryOptions}
                       下載備份檔
                     </button>
                     
-                    <label className="w-full flex items-center justify-center gap-2 bg-white border border-retro-primary text-retro-primary py-3 rounded-xl font-bold hover:bg-retro-primary/5 transition-all cursor-pointer">
+                    <button 
+                      onClick={() => document.getElementById('backupFileInput')?.click()}
+                      className="w-full flex items-center justify-center gap-2 bg-white border border-retro-primary text-retro-primary py-3 rounded-xl font-bold hover:bg-retro-primary/5 transition-all cursor-pointer"
+                    >
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
                       從備份檔還原
-                      <input type="file" accept=".json" className="hidden" onChange={handleImportBackup} />
-                    </label>
+                    </button>
+                    <input id="backupFileInput" type="file" accept=".json" className="hidden" onChange={handleImportBackup} />
                   </div>
                 </div>
               </div>
