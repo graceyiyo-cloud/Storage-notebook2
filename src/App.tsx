@@ -2214,18 +2214,75 @@ ${categoryOptions}
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-retro-text/75 mb-1">單位</label>
-                  <select
-                    value={formCapacityUnit}
-                    onChange={(e) => setFormCapacityUnit(e.target.value)}
-                    className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                  >
-                    <option value="ml">ml</option>
-                    <option value="g">g</option>
-                    <option value="個">個</option>
-                    <option value="罐">罐</option>
-                    <option value="錠">錠</option>
-                    <option value="顆">顆</option>
-                  </select>
+                  {showNewUnitInput ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newUnitName}
+                        onChange={(e) => setNewUnitName(e.target.value)}
+                        className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
+                        placeholder="新單位..."
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newUnitName.trim()) {
+                            e.preventDefault();
+                            const val = newUnitName.trim();
+                            if (!capacityUnits.includes(val)) {
+                              setCapacityUnits([...capacityUnits, val]);
+                            }
+                            setFormCapacityUnit(val);
+                            setShowNewUnitInput(false);
+                            setNewUnitName('');
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = newUnitName.trim();
+                          if (val) {
+                            if (!capacityUnits.includes(val)) {
+                              setCapacityUnits([...capacityUnits, val]);
+                            }
+                            setFormCapacityUnit(val);
+                          }
+                          setShowNewUnitInput(false);
+                          setNewUnitName('');
+                        }}
+                        className="p-2.5 bg-retro-primary text-white rounded-xl hover:bg-retro-primary/90 transition-colors"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewUnitInput(false);
+                          setNewUnitName('');
+                          if (formCapacityUnit === 'new') setFormCapacityUnit(capacityUnits[0] || 'ml');
+                        }}
+                        className="p-2.5 bg-stone-200 text-stone-600 rounded-xl hover:bg-stone-300 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={capacityUnits.includes(formCapacityUnit) ? formCapacityUnit : 'new'}
+                      onChange={(e) => {
+                        if (e.target.value === 'new') {
+                          setShowNewUnitInput(true);
+                        } else {
+                          setFormCapacityUnit(e.target.value);
+                        }
+                      }}
+                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
+                    >
+                      {capacityUnits.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                      <option value="new">➕ 新增單位...</option>
+                    </select>
+                  )}
                 </div>
               </div>
 
