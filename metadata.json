@@ -1,0 +1,7 @@
+{
+  "name": "化妝品管理系統",
+  "description": "精緻復古底片風格的化妝品與保養品庫存管理系統，支援 AI 拍照辨識、智慧補全、分類與子分類自訂拖曳、以及開封過期提醒。",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+ 
