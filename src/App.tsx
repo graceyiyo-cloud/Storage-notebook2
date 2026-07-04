@@ -558,7 +558,8 @@ function MainApp({ user }: { user: User }) {
 
   // --- File uploads & Photo Handling ---
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, isFormPhoto: boolean) => {
-    const file = target.files?.[0];
+    const file = e.target.files?.[0];
+    e.target.value = ""; // Reset input to allow selecting the same file again
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
