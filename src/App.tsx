@@ -428,6 +428,8 @@ function MainApp({ user }: { user: User }) {
     : (currentTab === 'settings' && settingsView === 'units') ? '#settings-units'
     : (currentTab === 'settings' && settingsView === 'history') ? '#settings-history'
     : (currentTab === 'settings' && settingsView === 'apikey') ? '#settings-apikey'
+    : (currentTab === 'settings' && settingsView === 'appearance') ? '#settings-appearance'
+    : (currentTab === 'settings' && settingsView === 'backup') ? '#settings-backup'
     : '';
 
   const getHashDepth = (hash: string) => {
@@ -496,6 +498,27 @@ function MainApp({ user }: { user: User }) {
         setShowAddForm(false);
         setSelectedDetailProduct(null);
         if (settingsView !== 'apikey') setSettingsView('apikey');
+      } else if (hash === '#settings-appearance') {
+        setConfirmDialog(null);
+        setCropImageSrc(null);
+        setFullscreenImage(null);
+        setShowAddForm(false);
+        setSelectedDetailProduct(null);
+        if (settingsView !== 'appearance') setSettingsView('appearance');
+      } else if (hash === '#settings-backup') {
+        setConfirmDialog(null);
+        setCropImageSrc(null);
+        setFullscreenImage(null);
+        setShowAddForm(false);
+        setSelectedDetailProduct(null);
+        if (settingsView !== 'backup') setSettingsView('backup');
+      } else if (hash === '#settings-units') {
+        setConfirmDialog(null);
+        setCropImageSrc(null);
+        setFullscreenImage(null);
+        setShowAddForm(false);
+        setSelectedDetailProduct(null);
+        if (settingsView !== 'units') setSettingsView('units');
       } else if (hash === '#add') {
         setConfirmDialog(null);
         setCropImageSrc(null);
@@ -3971,11 +3994,15 @@ function ProductCard({
                   <Package className="w-3 h-3 text-retro-primary" />
                   {totalQty}
                 </span>
-                <span className="w-px h-2.5 bg-stone-300"></span>
-                <span className="flex items-center gap-1">
-                  <PackageOpen className="w-3 h-3 text-emerald-500" />
-                  {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
-                </span>
+                {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0) > 0 && (
+                  <>
+                    <span className="w-px h-2.5 bg-stone-300"></span>
+                    <span className="flex items-center gap-1">
+                      <PackageOpen className="w-3 h-3 text-emerald-500" />
+                      {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
+                    </span>
+                  </>
+                )}
               </span>
             )}
             {isArchived && product.archivedAt && (
