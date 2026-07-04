@@ -31,7 +31,7 @@ import {
   Star,
   ShoppingBag,
   ShoppingCart,
-  ChevronRight,
+  ChevronRight, PackageOpen,
   History,
   Type,
   ImageIcon,
@@ -240,7 +240,7 @@ function MainApp({ user }: { user: User }) {
 
       } catch (err: any) {
         console.error('Error saving data', err);
-        setToastMessage(`儲存失敗: ${err.message || String(err)}`);
+        showToast(`儲存失敗: ${err.message || String(err)}`);
       }
     };
     saveUserData();
@@ -326,6 +326,7 @@ function MainApp({ user }: { user: User }) {
   // --- Gemini API Loading States ---
   const [diagnosticLog, setDiagnosticLog] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [isSearchingAi, setIsSearchingAi] = useState(false);
   const [aiStatusText, setAiStatusText] = useState('正在處理圖片...');
 
@@ -539,7 +540,7 @@ function MainApp({ user }: { user: User }) {
   }, [formUsage]);
 
   // --- Toast Manager ---
-  const showToast = (msg: string) => {
+  const showToast = (msg: string | null) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
@@ -620,22 +621,22 @@ function MainApp({ user }: { user: User }) {
           // Upload to Firebase Storage
           const uploadToStorage = async () => {
             if (!user) {
-              setToastMessage('請先登入');
+              showToast('請先登入');
               return;
             }
-            setIsAnalyzing(true);
-            setToastMessage('上傳圖片中...');
+            setIsUploading(true);
+            showToast('上傳圖片中...');
             try {
               const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.jpg`);
               await uploadString(storageRef, compressedBase64, 'data_url');
               const downloadURL = await getDownloadURL(storageRef);
               setFormPhoto(downloadURL);
-              setToastMessage('圖片上傳成功');
+              showToast('圖片上傳成功');
             } catch (error: any) {
               console.error('Upload error:', error);
-              setToastMessage(`圖片上傳失敗: ${error.message}`);
+              showToast(`圖片上傳失敗: ${error.message}`);
             } finally {
-              setIsAnalyzing(false);
+              setIsUploading(false);
             }
           };
           uploadToStorage();
@@ -1744,12 +1745,16 @@ ${categoryOptions}
     const matchedProds = products.filter(p => p.status === 'active' && p.category === categoryId && p.subcategory === subName);
     const totalCount = matchedProds.length;
     let totalQty = 0;
+    let openedQty = 0;
     matchedProds.forEach(p => {
       p.instances.forEach(i => {
         totalQty += i.qty;
+        if (i.usage === '使用中') {
+          openedQty += i.qty;
+        }
       });
     });
-    return { count: totalCount, qty: totalQty };
+    return { count: totalCount, qty: totalQty, openedQty };
   };
 
   const getCategoryStats = (categoryId: string) => {
@@ -1787,7 +1792,7 @@ ${categoryOptions}
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
-    setToastMessage("備份檔已下載，您可以將其上傳至 Google Drive 保存");
+    showToast("備份檔已下載，您可以將其上傳至 Google Drive 保存");
   };
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1801,7 +1806,7 @@ ${categoryOptions}
         if (json.categories && json.products) {
           setCategories(json.categories);
           setProducts(json.products);
-          setToastMessage("資料已成功還原！正在同步至雲端...");
+          showToast("資料已成功還原！正在同步至雲端...");
           
           // Force save to localStorage immediately
           localStorage.setItem('cosmetics_backup_categories', JSON.stringify(json.categories));
@@ -1815,11 +1820,11 @@ ${categoryOptions}
              }
           }
         } else {
-          setToastMessage("備份檔格式不正確");
+          showToast("備份檔格式不正確");
         }
       } catch (err) {
         console.error(err);
-        setToastMessage("讀取備份檔失敗");
+        showToast("讀取備份檔失敗");
       }
     };
     reader.readAsText(file);
@@ -1980,6 +1985,20 @@ ${categoryOptions}
             </div>
           </div>
         )}
+        {isUploading && (
+          <div className="fixed inset-0 bg-stone-900/85 z-50 flex items-center justify-center p-6 backdrop-blur-sm">
+            <div className="bg-retro-card p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl border border-retro-primary/20">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-12 h-12 rounded-full border-4 border-retro-primary border-t-transparent animate-spin"></div>
+                <h3 className="font-bold font-display text-lg tracking-wide flex items-center gap-1.5 justify-center">
+                  照片上傳中...
+                </h3>
+                <p className="text-xs text-retro-text/75 font-semibold mt-1">請稍候</p>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* 5. Add / Edit Product Form */}
         {showAddForm && (
@@ -2430,51 +2449,15 @@ ${categoryOptions}
                   </button>
 
 
-                  <div className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm flex flex-col gap-4">
+                  <button onClick={() => setSettingsView('appearance')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600">
                         <Sparkles className="w-5 h-5" />
                       </div>
-                      <span className="font-bold text-retro-text text-sm">視覺風格設定</span>
+                      <span className="font-bold text-retro-text text-sm">外觀設定 (風格與字體)</span>
                     </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleThemeChange('retro')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'retro' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >復古風</button>
-                      <button 
-                        onClick={() => handleThemeChange('pixel')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'pixel' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >像素風</button>
-                      <button 
-                        onClick={() => handleThemeChange('minimal')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'minimal' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >文青風</button>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm flex flex-col gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600">
-                        <Type className="w-5 h-5" />
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">字體大小設定</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleFontSizeChange('small')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'small' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >小</button>
-                      <button 
-                        onClick={() => handleFontSizeChange('medium')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'medium' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >中</button>
-                      <button 
-                        onClick={() => handleFontSizeChange('large')}
-                        className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'large' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                      >大</button>
-                    </div>
-                  </div>
+                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary transition-colors" />
+                  </button>
                   
                   <div className="mt-2">
                     <button onClick={handleRecoverData} className="w-full p-4 bg-orange-50 border border-orange-100 rounded-2xl shadow-sm hover:border-orange-200 transition-all flex items-center justify-center group cursor-pointer">
@@ -2797,6 +2780,63 @@ ${categoryOptions}
               </div>
             )}
 
+            
+            {settingsView === 'appearance' && (
+              <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex justify-end p-0 animate-fade-in">
+                <div className="w-full sm:w-96 bg-stone-50 h-full shadow-2xl flex flex-col animate-slide-in-right pb-safe">
+                  <div className="p-4 flex items-center gap-3 border-b border-retro-text/10 bg-white">
+                    <button onClick={() => setSettingsView(null)} className="w-10 h-10 flex flex-col items-center justify-center rounded-xl bg-stone-100 text-retro-text hover:bg-stone-200 transition-colors cursor-pointer">
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <h2 className="text-lg font-bold font-display text-retro-text flex-1">外觀設定</h2>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-retro-primary" />
+                        <h3 className="font-bold text-retro-text text-sm">視覺風格設定</h3>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleThemeChange('retro')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'retro' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >復古風</button>
+                        <button 
+                          onClick={() => handleThemeChange('pixel')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'pixel' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >像素風</button>
+                        <button 
+                          onClick={() => handleThemeChange('minimal')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'minimal' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >文青風</button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center gap-2">
+                        <Type className="w-5 h-5 text-retro-primary" />
+                        <h3 className="font-bold text-retro-text text-sm">字體大小設定</h3>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleFontSizeChange('small')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'small' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >小</button>
+                        <button 
+                          onClick={() => handleFontSizeChange('medium')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'medium' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >中</button>
+                        <button 
+                          onClick={() => handleFontSizeChange('large')}
+                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'large' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
+                        >大</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {settingsView === 'history' && (
               <div className="space-y-4 animate-fade-in">
                 <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
@@ -2965,11 +3005,16 @@ ${categoryOptions}
                         <div className="flex items-center text-xs text-retro-text/70 font-bold tracking-wider px-1">
                           <span className="text-retro-text/30 mr-1.5 font-normal">└</span>
                           <span>{subName}</span>
-                          <span className="ml-auto text-[10px] bg-retro-primary/10 text-retro-primary px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                            <span>{stats.count}件</span>
-                            <span className="opacity-40">|</span>
-                            <Package className="w-3 h-3" />
-                            <span>{stats.qty}</span>
+                          <span className="ml-auto text-[10px] bg-retro-primary/10 text-retro-primary px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 shadow-sm">
+                            <span className="flex items-center gap-1" title="總數量">
+                              <Package className="w-3 h-3" />
+                              <span>{stats.qty}</span>
+                            </span>
+                            <span className="w-px h-2.5 bg-retro-primary/20"></span>
+                            <span className="flex items-center gap-1 text-emerald-600" title="使用中">
+                              <PackageOpen className="w-3 h-3" />
+                              <span>{stats.openedQty}</span>
+                            </span>
                           </span>
                         </div>
 
@@ -3692,10 +3737,19 @@ function ProductCard({
             )}
           </span>
           <div className="flex items-center gap-2 mt-1.5">
-            <span className="text-[10px] font-semibold text-retro-text/50 bg-stone-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <Package className="w-3 h-3 text-retro-primary" />
-              共 {totalQty} 件
+            
+            <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-sm">
+              <span className="flex items-center gap-1">
+                <Package className="w-3 h-3 text-retro-primary" />
+                {totalQty}
+              </span>
+              <span className="w-px h-2.5 bg-stone-300"></span>
+              <span className="flex items-center gap-1">
+                <PackageOpen className="w-3 h-3 text-emerald-500" />
+                {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
+              </span>
             </span>
+
           </div>
         </div>
       </div>
