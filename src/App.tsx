@@ -2439,17 +2439,6 @@ ${categoryOptions}
                     <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
                   </button>
 
-                  <button onClick={() => setSettingsView('backup')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">備份與還原 (可存至 Google Drive)</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
-
-
                   <button onClick={() => setSettingsView('appearance')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600">
@@ -2458,6 +2447,17 @@ ${categoryOptions}
                       <span className="font-bold text-retro-text text-sm">外觀設定 (風格與字體)</span>
                     </div>
                     <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary transition-colors" />
+                  </button>
+
+
+                  <button onClick={() => setSettingsView('backup')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                      </div>
+                      <span className="font-bold text-retro-text text-sm">備份與還原 (可存至 Google Drive)</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
                   </button>
                   
                   <div className="mt-2">
@@ -2592,7 +2592,7 @@ ${categoryOptions}
                         onDragStart={(e) => handleCatDragStart(e, idx)}
                         onDragOver={handleCatDragOver}
                         onDrop={(e) => handleCatDrop(e, idx)}
-                        className="flex items-center justify-between p-3 bg-stone-50 border-b border-stone-100 hover:bg-stone-100/50 transition-colors"
+                        className="flex items-center justify-between p-3 bg-stone-50 border-b border-stone-100 hover:bg-stone-100 transition-colors"
                       >
                         <div className="flex items-center gap-2">
                           <div className="cursor-grab p-1 hover:bg-stone-200 rounded text-stone-400 active:text-stone-700 hidden sm:block">
@@ -2634,7 +2634,7 @@ ${categoryOptions}
 
                       {/* Small Categories Sub-list (Requirement 1) */}
                       {activeCategoryForSub === cat.id && (
-                        <div className="p-3 bg-stone-50/50 border-t border-stone-100/60 space-y-3">
+                        <div className="p-3 bg-stone-50 border-t border-stone-100/60 space-y-3">
                           <div className="flex justify-between items-center">
                             <div className="text-[11px] font-bold text-retro-secondary flex items-center gap-1">
                               <span>【{cat.name}】的小分類管理</span>
@@ -2809,7 +2809,7 @@ ${categoryOptions}
                         <button 
                           onClick={() => handleThemeChange('minimal')}
                           className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'minimal' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >文青風</button>
+                        >夜森林</button>
                       </div>
                     </div>
 
@@ -3079,7 +3079,7 @@ ${categoryOptions}
         <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
           <div className="w-full h-[100dvh] sm:h-auto sm:max-w-md bg-white sm:border-2 border-retro-text sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[85dvh] animate-slide-up pb-safe">
             {/* Top Bar with Drag Handle for Mobile / Header */}
-            <div className="relative pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-5 border-b border-retro-text/5 flex items-start gap-4 bg-stone-50/50">
+            <div className="relative pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-5 border-b border-retro-text/5 flex items-start gap-4 bg-transparent">
               {selectedDetailProduct.photo ? (
                 <img 
                   referrerPolicy="no-referrer"
@@ -3124,7 +3124,7 @@ ${categoryOptions}
             </div>
 
             {/* Middle Nav Buttons */}
-            <div className="p-3 bg-stone-100/50 border-b border-retro-text/5 grid grid-cols-4 gap-2 flex-shrink-0">
+            <div className="p-3 bg-transparent border-b border-retro-text/5 grid grid-cols-4 gap-2 flex-shrink-0">
               <button
                 onClick={() => setDetailActiveTab('status')}
                 className={`py-2 px-1 text-[11px] font-bold rounded-xl transition-all border flex flex-col items-center gap-0.5 cursor-pointer ${
@@ -3333,7 +3333,7 @@ ${categoryOptions}
                           </div>
 
                           {/* PAO Expiry / Date Details Grid */}
-                          <div className="rounded-xl overflow-hidden bg-stone-50/50 mt-2 border border-retro-text/10">
+                          <div className="rounded-xl overflow-hidden bg-stone-50 mt-2 border border-retro-text/10">
                             {/* Row 1: Expiry */}
                             <div className="grid grid-cols-3 divide-x divide-retro-text/10 border-b border-retro-text/10 bg-retro-bg/30 text-[10px] font-bold text-retro-text/60">
                               <div className="px-3 py-1.5 flex items-center">數量 / 容量</div>
