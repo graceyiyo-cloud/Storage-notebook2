@@ -14,7 +14,14 @@
     <link rel="icon" type="image/png" href="./icon.png" />
 
     <title>美妝保養庫存管理</title>
+  
+    <script>
+      window.addEventListener('error', function(e) {
+        document.body.innerHTML = '<div style="color: red; padding: 20px;"><h1>Error</h1><pre>' + e.message + '\n' + e.filename + ':' + e.lineno + '</pre></div>';
+      });
+    </script>
   </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

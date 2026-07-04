@@ -1475,6 +1475,47 @@ ${categoryOptions}
     handleFormSave(fakeEvent, true);
   };
 
+  const handleRestoreMaster = (archivedProduct: Product) => {
+    askConfirmation(
+      '還原紀錄',
+      `確定要還原「${archivedProduct.name}」的所有紀錄嗎？
+還原後將回到原本的分類中。`,
+      () => {
+        let updatedProducts = [...products];
+        // Remove the archived product from the list
+        updatedProducts = updatedProducts.filter(p => p.id !== archivedProduct.id);
+        
+        // Find if there is an active product with the exact same details
+        const existingActiveProductIndex = updatedProducts.findIndex(p => 
+          p.status === 'active' &&
+          p.category === archivedProduct.category &&
+          p.brand === archivedProduct.brand &&
+          p.name === archivedProduct.name
+        );
+        
+        if (existingActiveProductIndex >= 0) {
+          // Merge instances into the existing active product
+          updatedProducts[existingActiveProductIndex] = {
+            ...updatedProducts[existingActiveProductIndex],
+            instances: [
+              ...updatedProducts[existingActiveProductIndex].instances,
+              ...archivedProduct.instances
+            ]
+          };
+        } else {
+          // No existing active product, just change status back to active
+          updatedProducts.push({
+            ...archivedProduct,
+            status: 'active'
+          });
+        }
+        
+        setProducts(updatedProducts);
+        showToast('已成功還原紀錄！');
+      }
+    );
+  };
+
   // Archive a specific product instance (Requirement 4)
   const handleArchiveInstance = (prodId: string, instId: string) => {
     askConfirmation(
@@ -1506,6 +1547,7 @@ ${categoryOptions}
             name: (targetProduct as Product).name,
             photo: (targetProduct as Product).photo,
             status: 'archived',
+            archivedAt: new Date().toISOString(),
             threshold: (targetProduct as Product).threshold,
             instances: [{
               ...(archivedInstance as ProductInstance),
@@ -3008,12 +3050,23 @@ ${categoryOptions}
                         <div key={prod.id}>
                           <ProductCard 
                               product={prod} 
-                              onViewDetail={setSelectedDetailProduct}
+                              onViewDetail={() => {}}
                               onEdit={handleEditInstanceTrigger}
                               onArchive={handleArchiveInstance}
                               onAddAnother={handleAddAnotherInstanceTrigger}
                               onImageClick={setFullscreenImage}
                               categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
+                              onRestoreMaster={handleRestoreMaster}
+                              onDeleteMaster={(product) => {
+                                askConfirmation(
+                                  '永久刪除紀錄',
+                                  `確定要從歷史封存中永久刪除「${product.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
+                                  () => {
+                                    setProducts(products.filter(p => p.id !== product.id));
+                                    showToast('已永久刪除該紀錄');
+                                  }
+                                );
+                              }}
                             />
                         </div>
                       ))}
@@ -3311,6 +3364,25 @@ ${categoryOptions}
                 <Edit3 className="w-3.5 h-3.5" />
                 <span>編輯大品項</span>
               </button>
+              {selectedDetailProduct.status === 'archived' && (
+                <button
+                  onClick={() => {
+                    askConfirmation(
+                      '永久刪除紀錄',
+                      `確定要從歷史封存中永久刪除「${selectedDetailProduct.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
+                      () => {
+                        setProducts(products.filter(p => p.id !== selectedDetailProduct.id));
+                        setSelectedDetailProduct(null);
+                        showToast('已永久刪除該紀錄');
+                      }
+                    );
+                  }}
+                  className="py-2 px-1 text-[11px] font-bold bg-white text-red-400 hover:text-red-500 hover:bg-red-50 border border-retro-text/5 hover:border-red-200 rounded-xl transition-all flex flex-col items-center gap-0.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>永久刪除</span>
+                </button>
+              )}
             </div>
 
             {/* Scrollable Content Body */}
@@ -3805,7 +3877,9 @@ function ProductCard({
   onArchive,
   onAddAnother,
   onImageClick,
-  categoryIcon
+  categoryIcon,
+  onDeleteMaster,
+  onRestoreMaster
 }: { 
   product: Product; 
   onViewDetail: (prod: Product) => void; 
@@ -3813,9 +3887,11 @@ function ProductCard({
   onArchive: (prodId: string, instId: string) => void;
   onAddAnother: (prod: Product) => void;
   onImageClick?: (url: string) => void;
+  onDeleteMaster?: (prod: Product) => void;
+  onRestoreMaster?: (prod: Product) => void;
   categoryIcon: string;
 }) {
-  const instances = product.instances;
+  const instances = product.instances || [];
   const isArchived = product.status === 'archived';
 
   // Find standard shortest expiry days to show on outer circle badge
@@ -3838,9 +3914,9 @@ function ProductCard({
 
   return (
     <div 
-      onClick={() => onViewDetail(product)}
-      className={`py-3.5 pr-4 pl-1.5 sm:pl-2 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 cursor-pointer active:scale-[0.99] group relative ${isArchived ? 'opacity-60 grayscale' : ''}`}
-      title="點擊進入商品完整畫面"
+      onClick={() => { if (!isArchived) onViewDetail(product); }}
+      className={`py-3.5 pr-4 pl-1.5 sm:pl-2 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 group relative ${isArchived ? 'opacity-80 grayscale' : 'cursor-pointer active:scale-[0.99]'}`}
+      title={isArchived ? "" : "點擊進入商品完整畫面"}
     >
       <div className="flex gap-2.5 items-center min-w-0 flex-1">
         {/* Thumb */}
@@ -3880,7 +3956,7 @@ function ProductCard({
               </span>
             )}
           </span>
-          <div className="flex items-center gap-2 mt-1.5">
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
             
             <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-sm">
               <span className="flex items-center gap-1">
@@ -3893,7 +3969,12 @@ function ProductCard({
                 {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
               </span>
             </span>
-
+            {isArchived && product.archivedAt && (
+              <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1">
+                <ClockIcon className="w-3 h-3 text-stone-400" />
+                {product.archivedAt.split('T')[0].replace(/-/g, '/')} 封存
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -3913,8 +3994,32 @@ function ProductCard({
             </span>
           )}
         </div>
-        <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-retro-primary group-hover:translate-x-0.5 transition-all" />
+        {!isArchived && <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-retro-primary group-hover:translate-x-0.5 transition-all" />}
       </div>
+      {onRestoreMaster && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRestoreMaster(product);
+          }}
+          className={`absolute -top-2 right-8 w-8 h-8 bg-white border border-emerald-200 text-emerald-500 rounded-full flex items-center justify-center transition-all shadow-sm z-10 ${isArchived ? "opacity-100" : "opacity-0 group-hover:opacity-100"} hover:bg-emerald-50 hover:text-emerald-600`}
+          title="還原此紀錄"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+        </button>
+      )}
+      {onDeleteMaster && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteMaster(product);
+          }}
+          className={`absolute -top-2 -right-2 w-8 h-8 bg-white border border-red-200 text-red-500 rounded-full flex items-center justify-center transition-all shadow-sm z-10 ${isArchived ? "opacity-100" : "opacity-0 group-hover:opacity-100"} hover:bg-red-50 hover:text-red-600`}
+          title="永久刪除此紀錄"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+        </button>
+      )}
     </div>
   );
 }

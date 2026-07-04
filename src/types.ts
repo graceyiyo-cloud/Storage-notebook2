@@ -34,4 +34,5 @@ export interface Product {
   threshold: number; // 補貨門檻
   instances: ProductInstance[];
   status: 'active' | 'archived';
+  archivedAt?: string; // YYYY-MM-DD string or ISO timestamp
 }
