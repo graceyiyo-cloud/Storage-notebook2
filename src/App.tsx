@@ -3655,7 +3655,7 @@ function ProductCard({
     >
       <div className="flex gap-2.5 items-center min-w-0 flex-1">
         {/* Thumb */}
-        <div className="w-16 h-16 flex-shrink-0 flex items-center justify-center">
+        <div className="w-12 h-14 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center">
           {product.photo ? (
             <img 
               referrerPolicy="no-referrer"
