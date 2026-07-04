@@ -39,7 +39,7 @@ import {
   LucideIcon
 } from 'lucide-react';
 import { Category, Product, ProductInstance } from './types';
-import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from './data';
+import { INITIAL_CATEGORIES, INITIAL_PRODUCTS, INITIAL_CAPACITY_UNITS } from './data';
 import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { 
@@ -114,6 +114,7 @@ function CategoryIcon({ name, className = "w-5 h-5" }: { name: string; className
 function MainApp({ user }: { user: User }) {
   // --- Core State ---
   const [categories, setCategories] = useState<Category[]>([]);
+  const [capacityUnits, setCapacityUnits] = useState<string[]>(INITIAL_CAPACITY_UNITS);
 
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -130,6 +131,7 @@ function MainApp({ user }: { user: User }) {
         let rootProducts: Product[] = [];
         if (docSnap.exists()) {
           const data = docSnap.data();
+          if (data.capacityUnits) setCapacityUnits(data.capacityUnits);
           if (data.categories) {
             loadedCategories = data.categories;
             setCategories(data.categories);
@@ -201,6 +203,7 @@ function MainApp({ user }: { user: User }) {
         // Save categories to root doc
         await setDoc(userRef, {
           categories,
+          capacityUnits,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
@@ -245,7 +248,7 @@ function MainApp({ user }: { user: User }) {
       }
     };
     saveUserData();
-  }, [categories, products, isDataLoaded, user.uid]);
+  }, [categories, products, capacityUnits, isDataLoaded, user.uid]);
 
   const [apiKeys, setApiKeys] = useState<string[]>(() => {
     let keys = ['', '', ''];
@@ -380,6 +383,9 @@ function MainApp({ user }: { user: User }) {
   // --- Setting View States ---
   const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history' | 'appearance' | 'backup'>('menu');
   const [newCatName, setNewCatName] = useState('');
+  const [showNewUnitInput, setShowNewUnitInput] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [settingsUnitName, setSettingsUnitName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('sparkles');
   const [activeCategoryForSub, setActiveCategoryForSub] = useState<string | null>(null);
   const [newSubName, setNewSubName] = useState('');
@@ -418,6 +424,7 @@ function MainApp({ user }: { user: User }) {
     : showAddForm ? '#add'
     : selectedDetailProduct ? '#detail'
     : (currentTab === 'settings' && settingsView === 'category') ? '#settings-category'
+    : (currentTab === 'settings' && settingsView === 'units') ? '#settings-units'
     : (currentTab === 'settings' && settingsView === 'history') ? '#settings-history'
     : (currentTab === 'settings' && settingsView === 'apikey') ? '#settings-apikey'
     : '';
@@ -1783,6 +1790,7 @@ ${categoryOptions}
   const handleExportBackup = () => {
     const backupData = {
       categories,
+      capacityUnits,
       products,
       exportDate: new Date().toISOString()
     };
@@ -1806,6 +1814,7 @@ ${categoryOptions}
         const json = JSON.parse(event.target?.result as string);
         if (json.categories && json.products) {
           setCategories(json.categories);
+          if (json.capacityUnits) setCapacityUnits(json.capacityUnits);
           setProducts(json.products);
           showToast("資料已成功還原！正在同步至雲端...");
           
@@ -2428,6 +2437,15 @@ ${categoryOptions}
                     </div>
                     <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
                   </button>
+                  <button onClick={() => setSettingsView('units')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V4h16v3"/><path d="M9 7v13"/><path d="M15 7v13"/><path d="M4 20h16"/></svg>
+                      </div>
+                      <span className="font-bold text-retro-text text-sm">設定容量單位</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
+                  </button>
 
                   <button onClick={() => setSettingsView('history')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
                     <div className="flex items-center gap-3">
@@ -2834,6 +2852,74 @@ ${categoryOptions}
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+                        {settingsView === 'units' && (
+              <div className="space-y-4 animate-fade-in">
+                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
+                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
+                </button>
+                <div className="p-5 bg-retro-card rounded-2xl border border-retro-text/10 shadow-sm space-y-4">
+                  <h3 className="text-sm font-bold text-retro-secondary flex items-center gap-1.5">
+                    容量單位管理
+                  </h3>
+                  <p className="text-xs text-retro-text/60 leading-relaxed font-medium">
+                    在這裡新增或刪除您需要的商品容量單位（如 ml, g, 顆 等）。輸入商品時也可直接新增。
+                  </p>
+                  
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={settingsUnitName}
+                      onChange={(e) => setSettingsUnitName(e.target.value)}
+                      placeholder="輸入新單位..."
+                      className="flex-1 p-2.5 bg-white border border-retro-text/10 rounded-xl text-sm focus:outline-none focus:border-retro-primary transition-colors"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && settingsUnitName.trim()) {
+                           const val = settingsUnitName.trim();
+                           if (!capacityUnits.includes(val)) {
+                             setCapacityUnits([...capacityUnits, val]);
+                           }
+                           setSettingsUnitName('');
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                         const val = settingsUnitName.trim();
+                         if (val && !capacityUnits.includes(val)) {
+                           setCapacityUnits([...capacityUnits, val]);
+                         }
+                         setSettingsUnitName('');
+                      }}
+                      className="px-4 bg-retro-primary text-white rounded-xl text-sm font-bold hover:bg-retro-primary/90 transition-colors"
+                    >
+                      新增
+                    </button>
+                  </div>
+
+                  <ul className="flex flex-wrap gap-2 mt-4">
+                    {capacityUnits.map((u, idx) => (
+                      <li key={idx} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-retro-text/10 rounded-full text-xs font-bold text-retro-text shadow-sm">
+                        <span>{u}</span>
+                        <button 
+                          onClick={() => {
+                            askConfirmation('刪除單位', `確定要刪除單位「${u}」嗎？`, () => {
+                              setCapacityUnits(capacityUnits.filter(unit => unit !== u));
+                            });
+                          }}
+                          className="text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-full p-0.5 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                    {capacityUnits.length === 0 && (
+                      <li className="text-xs text-stone-400 w-full text-center py-4">目前沒有任何單位</li>
+                    )}
+                  </ul>
                 </div>
               </div>
             )}

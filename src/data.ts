@@ -106,3 +106,4 @@ export const INITIAL_PRODUCTS: Product[] = [
     ]
   }
 ];
+export const INITIAL_CAPACITY_UNITS = ['ml', 'g', '個', '罐', '錠', '顆', '片', '包', '盒', '支', '條', '瓶'];
