@@ -3650,10 +3650,10 @@ function ProductCard({
   return (
     <div 
       onClick={() => onViewDetail(product)}
-      className={`p-4 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 cursor-pointer active:scale-[0.99] group relative ${isArchived ? 'opacity-60 grayscale' : ''}`}
+      className={`py-3.5 pr-4 pl-2.5 sm:pl-3 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 cursor-pointer active:scale-[0.99] group relative ${isArchived ? 'opacity-60 grayscale' : ''}`}
       title="點擊進入商品完整畫面"
     >
-      <div className="flex gap-3.5 items-center min-w-0 flex-1">
+      <div className="flex gap-3 items-center min-w-0 flex-1">
         {/* Thumb */}
         <div className="w-16 h-16 flex-shrink-0 flex items-center justify-center">
           {product.photo ? (
@@ -3701,7 +3701,7 @@ function ProductCard({
       </div>
 
       {/* Right Circle Expiry Indicator */}
-      <div className="flex items-center gap-3 ml-3 flex-shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 ml-2 flex-shrink-0">
         <div className="flex flex-col items-center justify-center text-center">
           <div className="w-12 h-12 rounded-full bg-stone-50 border border-retro-text/5 flex flex-col items-center justify-center">
             <span className={`text-sm font-bold leading-none ${isUrgent ? 'text-red-500 font-extrabold' : 'text-retro-primary'}`}>
