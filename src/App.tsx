@@ -91,7 +91,7 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
     targetHeight
   );
 
-  return canvas.toDataURL('image/jpeg', 0.8);
+  return canvas.toDataURL('image/webp', 0.8);
 };
 
 
@@ -720,8 +720,8 @@ function MainApp({ user }: { user: User }) {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
         
-        // Compress as JPEG
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+        // Compress as WebP
+        const compressedBase64 = canvas.toDataURL('image/webp', 0.8);
 
         // Generate tiny thumbnail for instant load
         const thumbCanvas = document.createElement('canvas');
@@ -739,7 +739,7 @@ function MainApp({ user }: { user: User }) {
         thumbCanvas.height = tHeight;
         const tCtx = thumbCanvas.getContext('2d');
         tCtx?.drawImage(img, 0, 0, tWidth, tHeight);
-        const thumbBase64 = thumbCanvas.toDataURL('image/jpeg', 0.5);
+        const thumbBase64 = thumbCanvas.toDataURL('image/webp', 0.5);
 
         if (isCroppingFormPhoto) {
           // Upload to Firebase Storage
@@ -751,7 +751,7 @@ function MainApp({ user }: { user: User }) {
             setIsUploading(true);
             showToast('上傳圖片中...');
             try {
-              const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.jpg`);
+              const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.webp`);
               await uploadString(storageRef, compressedBase64, 'data_url');
               const downloadURL = await getDownloadURL(storageRef);
               setFormPhoto(downloadURL);
@@ -767,7 +767,7 @@ function MainApp({ user }: { user: User }) {
           uploadToStorage();
         } else {
           // Camera scan trigger
-          triggerAiScan(compressedBase64, 'image/jpeg');
+          triggerAiScan(compressedBase64, 'image/webp');
         }
       };
       img.src = croppedBase64;
