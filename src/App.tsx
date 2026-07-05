@@ -1953,13 +1953,16 @@ ${categoryOptions}
       products,
       exportDate: new Date().toISOString()
     };
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+    // Use text/plain and .txt so that Android's media scanner reliably picks it up and shows it in "Recent" files
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'text/plain' });
+    const dataStr = URL.createObjectURL(blob);
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `cosmetics_backup_${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchorNode.setAttribute("download", `cosmetics_backup_${new Date().toISOString().split('T')[0]}.txt`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
+    setTimeout(() => URL.revokeObjectURL(dataStr), 100);
     showToast("備份檔已下載，您可以將其上傳至 Google Drive 保存");
   };
 
@@ -3015,7 +3018,7 @@ ${categoryOptions}
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
                       從備份檔還原
                     </button>
-                    <input id="backupFileInput" type="file" className="hidden" onChange={handleImportBackup} />
+                    <input id="backupFileInput" type="file" accept=".json,.txt,application/json,text/plain" className="hidden" onChange={handleImportBackup} />
                   </div>
                 </div>
               </div>
