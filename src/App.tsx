@@ -94,6 +94,77 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
   return canvas.toDataURL('image/jpeg', 0.8);
 };
 
+
+// --- Cached Image Component ---
+const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }: any) => {
+  const [cachedSrc, setCachedSrc] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!src) return;
+
+    // Fast path: if it's a blob or data URL, just use it
+    if (src.startsWith('data:') || src.startsWith('blob:')) {
+      setCachedSrc(src);
+      return;
+    }
+
+    const loadImg = async () => {
+      try {
+        if ('caches' in window) {
+          const cache = await caches.open('product-images-v1');
+          const response = await cache.match(src);
+          if (response) {
+            const blob = await response.blob();
+            if (isMounted) setCachedSrc(URL.createObjectURL(blob));
+            return;
+          }
+          
+          // Fetch and cache
+          const fetchResponse = await fetch(src, { mode: 'cors' });
+          if (fetchResponse.ok) {
+            cache.put(src, fetchResponse.clone());
+            const blob = await fetchResponse.blob();
+            if (isMounted) setCachedSrc(URL.createObjectURL(blob));
+          } else {
+            if (isMounted) setCachedSrc(src);
+          }
+        } else {
+          if (isMounted) setCachedSrc(src);
+        }
+      } catch (err) {
+        console.warn('Cache error:', err);
+        if (isMounted) setCachedSrc(src);
+      }
+    };
+    loadImg();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [src]);
+
+  return (
+    <div className={`relative ${className || ''}`} onClick={onClick}>
+      {!isLoaded && cachedSrc && (
+        <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
+          <ImageIcon className="w-4 h-4 text-stone-300" />
+        </div>
+      )}
+      {cachedSrc && (
+        <img
+          src={cachedSrc}
+          alt={alt}
+          className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+          onLoad={() => setIsLoaded(true)}
+          {...props}
+        />
+      )}
+    </div>
+  );
+};
+
 // Helper component to render icons based on category settings
 const IconMap: Record<string, LucideIcon> = {
   sparkles: Sparkles,
@@ -3302,12 +3373,12 @@ ${categoryOptions}
             {/* Top Bar with Drag Handle for Mobile / Header */}
             <div className="relative pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-5 border-b border-retro-text/5 flex items-start gap-4 bg-transparent">
               {selectedDetailProduct.photo ? (
-                <img 
-                  referrerPolicy="no-referrer"
+                <CachedImage
                   src={selectedDetailProduct.photo} 
                   alt={selectedDetailProduct.name}
                   onClick={() => setFullscreenImage(selectedDetailProduct.photo!)}
-                  className="h-18 w-auto max-w-[8rem] rounded-xl object-cover border border-retro-text/10 shadow-sm cursor-pointer hover:scale-105 transition-transform"
+                  className="h-18 w-18 flex-shrink-0"
+                  imageClassName="h-18 w-auto max-w-[8rem] rounded-xl object-cover border border-retro-text/10 shadow-sm cursor-pointer hover:scale-105 transition-transform"
                 />
               ) : (
                 <div className="w-14 h-18 rounded-xl bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary flex-shrink-0">
@@ -3873,12 +3944,12 @@ ${categoryOptions}
           className="fixed inset-0 bg-stone-900/90 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-fade-in cursor-zoom-out"
           onClick={() => setFullscreenImage(null)}
         >
-          <img 
-            referrerPolicy="no-referrer"
+          <CachedImage
             src={fullscreenImage} 
             alt="Fullscreen preview" 
-            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl animate-slide-up"
-            onClick={(e) => e.stopPropagation()}
+            className="w-full h-full flex items-center justify-center"
+            imageClassName="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-slide-up"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           />
           <button 
             className="absolute top-4 right-4 sm:top-8 sm:right-8 w-10 h-10 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-black/80 transition-colors"
@@ -3945,17 +4016,17 @@ function ProductCard({
         {/* Thumb */}
         <div className="w-12 h-14 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center">
           {product.photo ? (
-            <img 
-              referrerPolicy="no-referrer"
+            <CachedImage
               src={product.photo} 
               alt={product.name}
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent) => {
                 if (onImageClick) {
                   e.stopPropagation();
                   onImageClick(product.photo!);
                 }
               }}
-              className="max-w-full max-h-full rounded-lg object-contain border border-retro-text/10 shadow-sm group-hover:scale-105 transition-transform"
+              className="w-full h-full flex items-center justify-center"
+              imageClassName="max-w-full max-h-full rounded-lg object-contain border border-retro-text/10 shadow-sm group-hover:scale-105 transition-transform"
             />
           ) : (
             <div className="w-full h-full rounded-lg bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary">
