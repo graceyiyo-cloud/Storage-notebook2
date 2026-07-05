@@ -3876,7 +3876,7 @@ ${categoryOptions}
             
             {/* Quick add instance footer */}
             {selectedDetailProduct.status !== 'archived' && (
-              <div className="p-3 border-t border-retro-text/5 bg-stone-50/80 flex gap-2 flex-shrink-0">
+              <div className="p-3 border-t border-retro-text/5 bg-white/90 backdrop-blur-sm flex gap-2 flex-shrink-0">
                 <button 
                   onClick={() => {
                     handleAddAnotherInstanceTrigger(selectedDetailProduct);

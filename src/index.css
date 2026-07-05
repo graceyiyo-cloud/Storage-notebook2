@@ -22,9 +22,9 @@
 [data-theme="minimal"] {
   --theme-bg: #1A2421;
   --theme-card: #222C29;
-  --theme-primary: #E0A96D;
-  --theme-secondary: #82937E;
-  --theme-text: #E8E6E1;
+  --theme-primary: #E8B986;
+  --theme-secondary: #9DB498;
+  --theme-text: #FFFFFF;
   --theme-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --theme-font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
@@ -149,11 +149,11 @@ body {
 }
 [data-theme="minimal"] .text-stone-500,
 [data-theme="minimal"] .text-stone-600 {
-  color: #A3B1AA !important;
+  color: #B5C4BC !important;
 }
 [data-theme="minimal"] .text-stone-800,
 [data-theme="minimal"] .text-stone-900 {
-  color: #E8E6E1 !important;
+  color: #FFFFFF !important;
 }
 [data-theme="minimal"] .border-retro-text\/10,
 [data-theme="minimal"] .border-retro-text\/5,
@@ -172,7 +172,7 @@ body {
 [data-theme="minimal"] select,
 [data-theme="minimal"] textarea {
   background-color: #222C29 !important;
-  color: #E8E6E1 !important;
+  color: #FFFFFF !important;
   border-color: #2D3A36 !important;
 }
 [data-theme="minimal"] .bg-gradient-to-t,
@@ -192,13 +192,13 @@ body {
 }
 
 /* Text Opacity Overrides */
-[data-theme="minimal"] .text-retro-text\/30 { color: rgba(232, 230, 225, 0.3) !important; }
-[data-theme="minimal"] .text-retro-text\/40 { color: rgba(232, 230, 225, 0.4) !important; }
-[data-theme="minimal"] .text-retro-text\/50 { color: rgba(232, 230, 225, 0.5) !important; }
-[data-theme="minimal"] .text-retro-text\/60 { color: rgba(232, 230, 225, 0.6) !important; }
-[data-theme="minimal"] .text-retro-text\/70 { color: rgba(232, 230, 225, 0.7) !important; }
-[data-theme="minimal"] .text-retro-text\/75 { color: rgba(232, 230, 225, 0.75) !important; }
-[data-theme="minimal"] .text-retro-text\/80 { color: rgba(232, 230, 225, 0.8) !important; }
+[data-theme="minimal"] .text-retro-text\/30 { color: rgba(255, 255, 255, 0.4) !important; }
+[data-theme="minimal"] .text-retro-text\/40 { color: rgba(255, 255, 255, 0.5) !important; }
+[data-theme="minimal"] .text-retro-text\/50 { color: rgba(255, 255, 255, 0.6) !important; }
+[data-theme="minimal"] .text-retro-text\/60 { color: rgba(255, 255, 255, 0.7) !important; }
+[data-theme="minimal"] .text-retro-text\/70 { color: rgba(255, 255, 255, 0.8) !important; }
+[data-theme="minimal"] .text-retro-text\/75 { color: rgba(255, 255, 255, 0.85) !important; }
+[data-theme="minimal"] .text-retro-text\/80 { color: rgba(255, 255, 255, 0.9) !important; }
 
 [data-theme="minimal"] .border-retro-text\/10 { border-color: rgba(232, 230, 225, 0.1) !important; }
 [data-theme="minimal"] .border-retro-text\/5 { border-color: rgba(232, 230, 225, 0.05) !important; }
@@ -229,5 +229,5 @@ body {
 
 [data-theme="minimal"] option {
   background-color: #222C29 !important;
-  color: #E8E6E1 !important;
+  color: #FFFFFF !important;
 }
