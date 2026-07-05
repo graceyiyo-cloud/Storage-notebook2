@@ -96,7 +96,7 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 
 
 // --- Cached Image Component ---
-const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }: any) => {
+const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
   const [cachedSrc, setCachedSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -147,7 +147,10 @@ const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }:
 
   return (
     <div className={`relative ${className || ''}`} onClick={onClick}>
-      {!isLoaded && cachedSrc && (
+      {!isLoaded && thumbnail && (
+        <img src={thumbnail} alt="thumbnail" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-sm opacity-50 scale-105`} />
+      )}
+      {!isLoaded && !thumbnail && cachedSrc && (
         <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
           <ImageIcon className="w-4 h-4 text-stone-300" />
         </div>
@@ -421,6 +424,7 @@ function MainApp({ user }: { user: User }) {
   const [formOpenedDate, setFormOpenedDate] = useState(''); // 開封日期
   const [formFinishedDate, setFormFinishedDate] = useState(''); // 用完或丟棄的日期
   const [formPhoto, setFormPhoto] = useState<string>(''); // Base64 string
+  const [formPhotoThumbnail, setFormPhotoThumbnail] = useState<string>(''); // Thumbnail base64
   const [formPurchaseDate, setFormPurchaseDate] = useState('');
   const [formPurchasePlace, setFormPurchasePlace] = useState('');
   const [formPrice, setFormPrice] = useState('');
@@ -721,6 +725,24 @@ function MainApp({ user }: { user: User }) {
         // Compress as JPEG
         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
+        // Generate tiny thumbnail for instant load
+        const thumbCanvas = document.createElement('canvas');
+        const THUMB_SIZE = 64;
+        let tWidth = img.width;
+        let tHeight = img.height;
+        if (tWidth > tHeight) {
+          tHeight *= THUMB_SIZE / tWidth;
+          tWidth = THUMB_SIZE;
+        } else {
+          tWidth *= THUMB_SIZE / tHeight;
+          tHeight = THUMB_SIZE;
+        }
+        thumbCanvas.width = tWidth;
+        thumbCanvas.height = tHeight;
+        const tCtx = thumbCanvas.getContext('2d');
+        tCtx?.drawImage(img, 0, 0, tWidth, tHeight);
+        const thumbBase64 = thumbCanvas.toDataURL('image/jpeg', 0.5);
+
         if (isCroppingFormPhoto) {
           // Upload to Firebase Storage
           const uploadToStorage = async () => {
@@ -735,6 +757,7 @@ function MainApp({ user }: { user: User }) {
               await uploadString(storageRef, compressedBase64, 'data_url');
               const downloadURL = await getDownloadURL(storageRef);
               setFormPhoto(downloadURL);
+              setFormPhotoThumbnail(thumbBase64);
               showToast('圖片上傳成功');
             } catch (error: any) {
               console.error('Upload error:', error);
@@ -1227,6 +1250,7 @@ ${categoryOptions}
     setFormOpenedDate(new Date().toISOString().split('T')[0]);
     setFormFinishedDate('');
     setFormPhoto('');
+    setFormPhotoThumbnail('');
     setFormPurchaseDate(new Date().toISOString().split('T')[0]);
     setFormPurchasePlace('');
     setFormPrice('');
@@ -1296,6 +1320,7 @@ ${categoryOptions}
             brand: formBrand.trim(),
             name: formName.trim(),
             photo: formPhoto || prod.photo,
+            photoThumbnail: formPhotoThumbnail || prod.photoThumbnail,
             threshold: Number(formThreshold) || 0
           };
         }
@@ -1348,6 +1373,7 @@ ${categoryOptions}
             return {
               ...prod,
               photo: formPhoto || prod.photo,
+            photoThumbnail: formPhotoThumbnail || prod.photoThumbnail,
               instances: updatedInstances
             };
           }
@@ -1522,6 +1548,7 @@ ${categoryOptions}
     setFormOpenedDate(inst.openedDate || '');
     setFormFinishedDate(inst.finishedDate || '');
     setFormPhoto(prod.photo || '');
+    setFormPhotoThumbnail(prod.photoThumbnail || '');
     setFormPurchaseDate(inst.purchaseDate || '');
     setFormPurchasePlace(inst.purchasePlace || '');
     setFormPrice(inst.price !== undefined ? String(inst.price) : '');
@@ -1541,6 +1568,7 @@ ${categoryOptions}
     setFormCategory(prod.category);
     setFormSubcategory(prod.subcategory);
     setFormPhoto(prod.photo || '');
+    setFormPhotoThumbnail(prod.photoThumbnail || '');
     // Reset instance specific states to default
     setFormQty(1);
     setFormCapacity('');
@@ -1743,6 +1771,7 @@ ${categoryOptions}
     setFormSubcategory(prod.subcategory);
     setFormUsage('未開封');
     setFormPhoto(prod.photo || '');
+    setFormPhotoThumbnail(prod.photoThumbnail || '');
     
     setShowAddForm(true);
 
@@ -3374,7 +3403,8 @@ ${categoryOptions}
             <div className="relative pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-5 border-b border-retro-text/5 flex items-start gap-4 bg-transparent">
               {selectedDetailProduct.photo ? (
                 <CachedImage
-                  src={selectedDetailProduct.photo} 
+                  src={selectedDetailProduct.photo}
+                  thumbnail={selectedDetailProduct.photoThumbnail} 
                   alt={selectedDetailProduct.name}
                   onClick={() => setFullscreenImage(selectedDetailProduct.photo!)}
                   className="h-18 w-18 flex-shrink-0"
@@ -4017,7 +4047,8 @@ function ProductCard({
         <div className="w-12 h-14 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center">
           {product.photo ? (
             <CachedImage
-              src={product.photo} 
+              src={product.photo}
+              thumbnail={product.photoThumbnail} 
               alt={product.name}
               onClick={(e: React.MouseEvent) => {
                 if (onImageClick) {

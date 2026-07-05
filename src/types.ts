@@ -31,6 +31,7 @@ export interface Product {
   brand: string;
   name: string;
   photo?: string; // base64 string
+  photoThumbnail?: string; // tiny base64 string for instant loading
   threshold: number; // 補貨門檻
   instances: ProductInstance[];
   status: 'active' | 'archived';
