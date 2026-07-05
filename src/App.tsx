@@ -97,70 +97,34 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 
 // --- Cached Image Component ---
 const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
-  const [cachedSrc, setCachedSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Fallback to instantly mark as loaded if it's already a data URI
   useEffect(() => {
-    let isMounted = true;
-    if (!src) return;
-
-    // Fast path: if it's a blob or data URL, just use it
-    if (src.startsWith('data:') || src.startsWith('blob:')) {
-      setCachedSrc(src);
-      return;
+    if (src && (src.startsWith('data:') || src.startsWith('blob:'))) {
+      setIsLoaded(true);
+    } else {
+      setIsLoaded(false);
     }
-
-    const loadImg = async () => {
-      try {
-        if ('caches' in window) {
-          const cache = await caches.open('product-images-v1');
-          const response = await cache.match(src);
-          if (response) {
-            const blob = await response.blob();
-            if (isMounted) setCachedSrc(URL.createObjectURL(blob));
-            return;
-          }
-          
-          // Fetch and cache
-          const fetchResponse = await fetch(src, { mode: 'cors' });
-          if (fetchResponse.ok) {
-            cache.put(src, fetchResponse.clone());
-            const blob = await fetchResponse.blob();
-            if (isMounted) setCachedSrc(URL.createObjectURL(blob));
-          } else {
-            if (isMounted) setCachedSrc(src);
-          }
-        } else {
-          if (isMounted) setCachedSrc(src);
-        }
-      } catch (err) {
-        console.warn('Cache error:', err);
-        if (isMounted) setCachedSrc(src);
-      }
-    };
-    loadImg();
-
-    return () => {
-      isMounted = false;
-    };
   }, [src]);
 
   return (
-    <div className={`relative ${className || ''}`} onClick={onClick}>
+    <div className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
       {!isLoaded && thumbnail && (
-        <img src={thumbnail} alt="thumbnail" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-sm opacity-50 scale-105`} />
+        <img src={thumbnail} alt="thumbnail" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-md opacity-50 scale-105`} />
       )}
-      {!isLoaded && !thumbnail && cachedSrc && (
+      {!isLoaded && !thumbnail && (
         <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
           <ImageIcon className="w-4 h-4 text-stone-300" />
         </div>
       )}
-      {cachedSrc && (
+      {src && (
         <img
-          src={cachedSrc}
+          src={src}
           alt={alt}
-          className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-500 relative z-10 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setIsLoaded(true)}
+          referrerPolicy="no-referrer"
           {...props}
         />
       )}

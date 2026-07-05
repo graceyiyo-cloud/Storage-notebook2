@@ -1,9 +1,7 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/App.tsx', 'utf8');
 
-const cachedImageComponent = `
-// --- Cached Image Component ---
-const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }: any) => {
+const target = `const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
   const [cachedSrc, setCachedSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -54,7 +52,10 @@ const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }:
 
   return (
     <div className={\`relative \${className || ''}\`} onClick={onClick}>
-      {!isLoaded && cachedSrc && (
+      {!isLoaded && thumbnail && (
+        <img src={thumbnail} alt="thumbnail" className={\`absolute inset-0 \${imageClassName || 'w-full h-full object-contain'} blur-sm opacity-50 scale-105\`} />
+      )}
+      {!isLoaded && !thumbnail && cachedSrc && (
         <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
           <ImageIcon className="w-4 h-4 text-stone-300" />
         </div>
@@ -70,8 +71,43 @@ const CachedImage = ({ src, alt, className, imageClassName, onClick, ...props }:
       )}
     </div>
   );
-};
-`;
+};`;
 
-code = code.replace('// Helper component to render icons based on category settings', cachedImageComponent + '\n// Helper component to render icons based on category settings');
+const replacement = `const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // Fallback to instantly mark as loaded if it's already a data URI
+  useEffect(() => {
+    if (src && (src.startsWith('data:') || src.startsWith('blob:'))) {
+      setIsLoaded(true);
+    } else {
+      setIsLoaded(false);
+    }
+  }, [src]);
+
+  return (
+    <div className={\`relative \${className || ''} overflow-hidden\`} onClick={onClick}>
+      {!isLoaded && thumbnail && (
+        <img src={thumbnail} alt="thumbnail" className={\`absolute inset-0 \${imageClassName || 'w-full h-full object-contain'} blur-md opacity-50 scale-105\`} />
+      )}
+      {!isLoaded && !thumbnail && (
+        <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
+          <ImageIcon className="w-4 h-4 text-stone-300" />
+        </div>
+      )}
+      {src && (
+        <img
+          src={src}
+          alt={alt}
+          className={\`\${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-500 relative z-10 \${isLoaded ? 'opacity-100' : 'opacity-0'}\`}
+          onLoad={() => setIsLoaded(true)}
+          referrerPolicy="no-referrer"
+          {...props}
+        />
+      )}
+    </div>
+  );
+};`;
+
+code = code.replace(target, replacement);
 fs.writeFileSync('src/App.tsx', code);
