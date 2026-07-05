@@ -1457,9 +1457,7 @@ ${categoryOptions}
 
     setShowAddForm(true);
     // Smooth scroll to form
-    setTimeout(() => {
-      document.getElementById('manual-add-form')?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+
   };
 
   const handleEditProductMasterTrigger = (prod: Product) => {
@@ -1488,9 +1486,7 @@ ${categoryOptions}
 
     setShowAddForm(true);
     setSelectedDetailProduct(null); // Close detail screen
-    setTimeout(() => {
-      document.getElementById('manual-add-form')?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+
   };
 
   // Add same-product as a new instance (Save as new item)
@@ -1678,9 +1674,7 @@ ${categoryOptions}
     setFormPhoto(prod.photo || '');
     
     setShowAddForm(true);
-    setTimeout(() => {
-      document.getElementById('manual-add-form')?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+
   };
 
   const handleRecoverData = async () => {
@@ -1958,9 +1952,7 @@ ${categoryOptions}
               } else {
                 clearForm();
                 setShowAddForm(true);
-                setTimeout(() => {
-                  document.getElementById('manual-add-form')?.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
+
               }
             }}
             className="w-11 h-11 rounded-full bg-retro-secondary text-retro-card flex items-center justify-center cursor-pointer shadow-md active:scale-95 transition-all hover:brightness-105"
@@ -2082,8 +2074,9 @@ ${categoryOptions}
 
         {/* 5. Add / Edit Product Form */}
         {showAddForm && (
-          <div id="manual-add-form" className="mb-6 p-5 bg-retro-card rounded-2xl border border-retro-primary/30 shadow-md animate-fade-in">
-            <div className="flex justify-between items-center mb-4">
+          <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-[60] flex items-center justify-center p-4 animate-fade-in pb-safe">
+            <div id="manual-add-form" className="w-full max-w-md max-h-[90dvh] overflow-y-auto bg-retro-card rounded-2xl border border-retro-primary/30 shadow-2xl p-5 relative">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-retro-text/5">
               <h3 className="text-lg font-bold text-retro-secondary flex items-center gap-2">
                 <Sparkles className="w-5 h-5" />
                 {isEditingMaster ? '編輯大品項' : editingInstanceId ? '修改明細資訊' : isAddingInstanceToExisting ? '新增規格明細' : '確認新增品項'}
@@ -2531,6 +2524,7 @@ ${categoryOptions}
                 )}
               </div>
             </form>
+            </div>
           </div>
         )}
 
@@ -3558,7 +3552,6 @@ ${categoryOptions}
                                 <button 
                                   onClick={() => {
                                     handleEditInstanceTrigger(selectedDetailProduct, inst);
-                                    setSelectedDetailProduct(null); // Close modal
                                   }}
                                   className="action-btn-no-pixel text-retro-primary hover:text-retro-secondary p-0.5 transition-colors cursor-pointer"
                                   title="編輯此規格"
@@ -3788,7 +3781,6 @@ ${categoryOptions}
                 <button 
                   onClick={() => {
                     handleAddAnotherInstanceTrigger(selectedDetailProduct);
-                    setSelectedDetailProduct(null);
                   }}
                   className="w-full py-2.5 bg-retro-secondary hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 cursor-pointer"
                 >
