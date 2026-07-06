@@ -1933,15 +1933,18 @@ ${categoryOptions}
     const totalCount = matchedProds.length;
     let totalQty = 0;
     let openedQty = 0;
+    let unopenedQty = 0;
     matchedProds.forEach(p => {
       p.instances.forEach(i => {
         totalQty += i.qty;
         if (i.usage === '使用中') {
           openedQty += i.qty;
+        } else if (i.usage === '未開封') {
+          unopenedQty += i.qty;
         }
       });
     });
-    return { count: totalCount, qty: totalQty, openedQty };
+    return { count: totalCount, qty: totalQty, openedQty, unopenedQty };
   };
 
   const getCategoryStats = (categoryId: string) => {
@@ -3350,9 +3353,9 @@ ${categoryOptions}
                           <span className="text-retro-text/30 mr-1.5 font-normal">└</span>
                           <span>{subName}</span>
                           <span className="ml-auto text-[10px] bg-retro-primary/10 text-retro-primary px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 shadow-sm">
-                            <span className="flex items-center gap-1" title="總數量">
+                            <span className="flex items-center gap-1" title="未開封">
                               <Package className="w-3 h-3" />
-                              <span>{stats.qty}</span>
+                              <span>{stats.unopenedQty}</span>
                             </span>
                             <span className="w-px h-2.5 bg-retro-primary/20"></span>
                             <span className="flex items-center gap-1 text-emerald-600" title="使用中">
@@ -4106,9 +4109,9 @@ function ProductCard({
           <div className="flex flex-wrap items-center gap-2 mt-1.5">
             {!isArchived && (
               <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-sm">
-                <span className="flex items-center gap-1">
+                <span className="flex items-center gap-1" title="未開封">
                   <Package className="w-3 h-3 text-retro-primary" />
-                  {totalQty}
+                  {totalUnopenedQty}
                 </span>
                 {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0) > 0 && (
                   <>
