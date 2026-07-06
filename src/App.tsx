@@ -204,6 +204,8 @@ function CategoryIcon({ name, className = "w-5 h-5" }: { name: string; className
   return <IconComponent className={className} />;
 }
 
+const APP_VERSION = "2.0v";
+
 function MainApp({ user }: { user: User }) {
   // --- Core State ---
   const [categories, setCategories] = useState<Category[]>([]);
@@ -2052,6 +2054,7 @@ ${categoryOptions}
       <header className="px-5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky top-0 z-40 border-b border-retro-text/10 max-w-2xl mx-auto">
         <h1 className="text-2xl font-bold font-display tracking-tight flex items-center gap-2">
           <span>用品管理系統</span>
+          <span className="text-[11px] font-bold text-retro-primary bg-retro-primary/10 px-2 py-0.5 rounded-lg tracking-normal uppercase font-sans border border-retro-primary/20">{APP_VERSION}</span>
         </h1>
         <div className="flex gap-2">
           <button 
@@ -4228,7 +4231,10 @@ export default function App() {
           <div className="w-16 h-16 bg-retro-primary/10 rounded-2xl flex items-center justify-center text-retro-primary mb-6">
             <Sparkles className="w-8 h-8" />
           </div>
-          <h1 className="text-2xl font-bold font-display text-retro-text mb-2">用品管理系統</h1>
+          <h1 className="text-2xl font-bold font-display text-retro-text mb-2 flex items-center justify-center gap-2">
+            <span>用品管理系統</span>
+            <span className="text-[11px] font-bold text-retro-primary bg-retro-primary/10 px-2 py-0.5 rounded-lg tracking-normal uppercase font-sans border border-retro-primary/20">{APP_VERSION}</span>
+          </h1>
           <p className="text-retro-text/60 text-sm mb-8">
             精緻復古底片風格的化妝品與保養品庫存管理系統，請登入以存取專屬您的帳號資料。
           </p>
