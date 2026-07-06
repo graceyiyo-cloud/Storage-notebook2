@@ -1797,115 +1797,6 @@ ${categoryOptions}
 
   };
 
-  const handleRecoverData = async () => {
-    try {
-      showToast('開始全面掃描資料庫...');
-      let log = '';
-      let recoveredItems: Product[] = [];
-      const addLog = (msg: string) => {
-        log += msg + '\n';
-        console.log(msg);
-      };
-      
-      addLog(`=== 資料診斷報告 ===`);
-      addLog(`User UID: ${user.uid}`);
-      
-      // 1. Local Storage
-      addLog(`[Local Storage 全面掃描]`);
-      for (let i = 0; i < localStorage.length; i++) {
-         const key = localStorage.key(i);
-         if (key) {
-             const val = localStorage.getItem(key);
-             addLog(`Key: ${key} (長度: ${val?.length})`);
-             if (val && val.includes('instances') && val.includes('category')) {
-                 try {
-                     const parsed = JSON.parse(val);
-                     if (Array.isArray(parsed)) {
-                         addLog(` -> 解析成功！發現 ${parsed.length} 筆產品資料`);
-                         recoveredItems.push(...parsed);
-                     }
-                 } catch(e) {}
-             }
-         }
-      }
-      
-      const lsData = localStorage.getItem('cosmetics_products') || localStorage.getItem('products');
-      if (lsData) {
-         try {
-            const parsed = JSON.parse(lsData);
-            addLog(`Local Storage 找到 ${parsed.length} 筆資料`);
-            recoveredItems.push(...parsed);
-         } catch(e) {}
-      } else {
-         addLog(`Local Storage 沒有資料`);
-      }
-
-      // 2. Root Document
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-           const d = userSnap.data();
-           addLog(`主檔案存在, 欄位: ${Object.keys(d).join(', ')}`);
-           if (d.products && Array.isArray(d.products)) {
-              addLog(`主檔案 products 陣列有 ${d.products.length} 筆資料`);
-              recoveredItems.push(...d.products);
-           }
-        }
-      } catch (e: any) {
-        addLog(`讀取主檔案失敗: ${e.message}`);
-      }
-
-      // 3. Subcollection
-      try {
-        const subRef = collection(db, 'users', user.uid, 'products');
-        const subSnap = await getDocs(subRef);
-        addLog(`子集合 (products) 有 ${subSnap.size} 筆資料`);
-        subSnap.forEach(d => {
-           addLog(` - ${d.id}: ${d.data().name} (${d.data().instances?.length || 0} 個明細)`);
-           recoveredItems.push(d.data() as Product);
-        });
-      } catch (e: any) {
-        addLog(`讀取子集合失敗: ${e.message}`);
-      }
-
-      // Merge recovered
-      if (recoveredItems.length > 0) {
-         const mergedMap = new Map<string, Product>();
-         // Start with current state
-         products.forEach(p => mergedMap.set(p.id, p));
-         // Add recovered
-         recoveredItems.forEach(p => {
-            if (!mergedMap.has(p.id)) {
-               mergedMap.set(p.id, p);
-            } else {
-               const existing = mergedMap.get(p.id)!;
-               if (p.instances && existing.instances && p.instances.length > existing.instances.length) {
-                  mergedMap.set(p.id, p);
-               }
-            }
-         });
-         const finalProducts = Array.from(mergedMap.values());
-         addLog(`合併後總計: ${finalProducts.length} 筆資料 (原本畫面上有 ${products.length} 筆)`);
-         
-         if (finalProducts.length > products.length || JSON.stringify(finalProducts) !== JSON.stringify(products)) {
-            setProducts(finalProducts);
-            showToast(`已成功從歷史紀錄中還原合併資料！`);
-         } else {
-            showToast(`沒有找到更多遺失的資料。`);
-         }
-      } else {
-         showToast(`沒有找到任何歷史資料。`);
-      }
-      
-      setDiagnosticLog(log);
-    } catch (err: any) {
-      setDiagnosticLog(`發生未知的錯誤: ${err.message}`);
-      showToast('尋找資料時發生錯誤');
-    }
-  };
-
-  // --- Search Filtering Helper ---
   const activeProducts = products.filter(prod => {
     if (searchKeyword.trim()) {
       if (prod.status !== 'active') return false;
@@ -2054,7 +1945,6 @@ ${categoryOptions}
       <header className="px-5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky top-0 z-40 border-b border-retro-text/10 max-w-2xl mx-auto">
         <h1 className="text-2xl font-bold font-display tracking-tight flex items-center gap-2">
           <span>用品管理系統</span>
-          <span className="text-[11px] font-bold text-retro-primary bg-retro-primary/10 px-2 py-0.5 rounded-lg tracking-normal uppercase font-sans border border-retro-primary/20">{APP_VERSION}</span>
         </h1>
         <div className="flex gap-2">
           <button 
@@ -2726,17 +2616,18 @@ ${categoryOptions}
                     </div>
                     <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
                   </button>
-                  
-                  <div className="mt-2">
-                    <button onClick={handleRecoverData} className="w-full p-4 bg-orange-50 border border-orange-100 rounded-2xl shadow-sm hover:border-orange-200 transition-all flex items-center justify-center group cursor-pointer">
-                      <span className="font-bold text-orange-600 text-sm">尋找遺失的資料 (資料救援)</span>
-                    </button>
-                  </div>
 
                   <div className="mt-2">
                     <button onClick={logOut} className="w-full p-4 bg-red-50 border border-red-100 rounded-2xl shadow-sm hover:border-red-200 transition-all flex items-center justify-center group cursor-pointer">
                       <span className="font-bold text-red-600 text-sm">登出帳號</span>
                     </button>
+                  </div>
+                  
+                  <div className="mt-6 flex flex-col items-center justify-center gap-1.5 opacity-50">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-retro-text">用品管理系統</span>
+                      <span className="text-[9px] font-bold text-retro-text bg-retro-text/10 px-1.5 py-0.5 rounded uppercase">{APP_VERSION}</span>
+                    </div>
                   </div>
                 </div>
               </div>
