@@ -99,10 +99,30 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
   const [cachedSrc, setCachedSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' } // Load slightly before it comes into view
+    );
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
-    if (!src) return;
+    if (!src || !isVisible) return; // ONLY load if visible
 
     if (src.startsWith('data:') || src.startsWith('blob:')) {
       setCachedSrc(src);
@@ -140,12 +160,12 @@ const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, 
     return () => {
       isMounted = false;
     };
-  }, [src]);
+  }, [src, isVisible]);
 
   return (
-    <div className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
+    <div ref={containerRef} className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
       {!isLoaded && thumbnail && (
-        <img src={thumbnail} alt="thumbnail" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-md opacity-50 scale-105 transition-opacity duration-300`} />
+        <img src={thumbnail} alt="thumbnail" loading="lazy" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-md opacity-50 scale-105 transition-opacity duration-300`} />
       )}
       {!isLoaded && !thumbnail && (
         <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
@@ -156,6 +176,7 @@ const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, 
         <img
           src={cachedSrc}
           alt={alt}
+          loading="lazy"
           className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 relative z-10 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setIsLoaded(true)}
           referrerPolicy="no-referrer"
@@ -258,7 +279,6 @@ function MainApp({ user }: { user: User }) {
         }
 
       } catch (err) {
-        target.value = "";
         console.error('Error loading data', err);
       } finally {
         setIsDataLoaded(true);
@@ -455,7 +475,7 @@ function MainApp({ user }: { user: User }) {
   const [isAddingInstanceToExisting, setIsAddingInstanceToExisting] = useState(false);
 
   // --- Setting View States ---
-  const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history' | 'appearance' | 'backup'>('menu');
+  const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history' | 'appearance' | 'backup' | 'units'>('menu');
   const [newCatName, setNewCatName] = useState('');
   const [showNewUnitInput, setShowNewUnitInput] = useState(false);
   const [newUnitName, setNewUnitName] = useState('');
@@ -970,7 +990,7 @@ ${categoryOptions}
 
     // Fallback: Try WITHOUT Google Search tool, using pre-trained knowledge
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${activeApiKey}`;
+      const url = `[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$){activeApiKey}`;
       const payload = {
         contents: [{
           parts: [{
@@ -2223,6 +2243,7 @@ ${categoryOptions}
                           <img 
                             src={formPhoto} 
                             alt="預覽" 
+                            loading="lazy"
                             className="h-10 w-auto max-w-[4rem] rounded-lg object-cover border border-retro-text/10"
                           />
                           <button 
