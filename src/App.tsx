@@ -4100,7 +4100,6 @@ function ProductCard({
             </span>
           )}
         </div>
-        {!isArchived && <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-retro-primary group-hover:translate-x-0.5 transition-all" />}
       </div>
       {onRestoreMaster && (
         <button
