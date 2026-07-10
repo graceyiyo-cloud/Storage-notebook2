@@ -3940,16 +3940,57 @@ function ProductCard({
   // Find standard shortest expiry days to show on outer circle badge
   let minDaysToExpiry = 9999;
   let closestExpiryDate = '';
+  let closestOpenedDate = '';
+  let maxDaysSinceOpened = -1;
+
   instances.forEach(inst => {
-    const days = calculateDaysToExpiry(inst.expiry);
-    if (days < minDaysToExpiry) {
-      minDaysToExpiry = days;
-      closestExpiryDate = inst.expiry;
+    let currentMinDays = 9999;
+    let currentExpiryStr = '';
+
+    // Check normal expiry
+    if (inst.expiry) {
+      currentMinDays = calculateDaysToExpiry(inst.expiry);
+      currentExpiryStr = inst.expiry;
+    }
+
+    // Check PAO expiry
+    if (inst.usage === '使用中' && inst.paoMonths && inst.openedDate) {
+      const pao = calculatePaoExpiry(inst.openedDate, inst.paoMonths);
+      if (pao) {
+        if (pao.daysLeft < currentMinDays) {
+          currentMinDays = pao.daysLeft;
+          currentExpiryStr = pao.expiryDate;
+        }
+      }
+    }
+
+    // Update global min
+    if (currentMinDays < minDaysToExpiry) {
+      minDaysToExpiry = currentMinDays;
+      closestExpiryDate = currentExpiryStr;
+    }
+
+    // Track opened dates
+    if (inst.usage === '使用中' && inst.openedDate) {
+      const opened = new Date(inst.openedDate);
+      const today = new Date();
+      if (!isNaN(opened.getTime())) {
+        today.setHours(0,0,0,0);
+        opened.setHours(0,0,0,0);
+        const diff = Math.floor((today.getTime() - opened.getTime()) / (1000 * 60 * 60 * 24));
+        if (diff > maxDaysSinceOpened) {
+          maxDaysSinceOpened = diff;
+          closestOpenedDate = inst.openedDate;
+        }
+      }
     }
   });
 
+  const hasAnyExpiry = minDaysToExpiry !== 9999;
+  const showOpenedDateFallback = !hasAnyExpiry && closestOpenedDate !== '';
+
   // Calculate standard warning styles
-  const isUrgent = minDaysToExpiry <= 60;
+  const isUrgent = minDaysToExpiry <= 60 && hasAnyExpiry;
   const totalQty = instances.reduce((sum, inst) => sum + inst.qty, 0);
   const totalUnopenedQty = instances.filter(inst => inst.usage === '未開封').reduce((sum, inst) => sum + inst.qty, 0);
   const hasInUse = instances.some(inst => inst.usage === '使用中');
@@ -4032,14 +4073,30 @@ function ProductCard({
       <div className="flex items-center gap-2 sm:gap-3 ml-2 flex-shrink-0">
         <div className="flex flex-col items-center justify-center text-center">
           <div className="w-12 h-12 rounded-full bg-stone-50 border border-retro-text/5 flex flex-col items-center justify-center">
-            <span className={`text-sm font-bold leading-none ${isUrgent ? 'text-red-500 font-extrabold' : 'text-retro-primary'}`}>
-              {minDaysToExpiry !== 9999 ? minDaysToExpiry : '-'}
-            </span>
-            <span className="text-[8px] text-retro-text/50 font-bold mt-0.5">天到期</span>
+            {showOpenedDateFallback ? (
+              <>
+                <span className="text-sm font-bold leading-none text-retro-primary">
+                  {maxDaysSinceOpened}
+                </span>
+                <span className="text-[8px] text-retro-text/50 font-bold mt-0.5">天已開</span>
+              </>
+            ) : (
+              <>
+                <span className={`text-sm font-bold leading-none ${isUrgent ? 'text-red-500 font-extrabold' : 'text-retro-primary'}`}>
+                  {hasAnyExpiry ? minDaysToExpiry : '-'}
+                </span>
+                <span className="text-[8px] text-retro-text/50 font-bold mt-0.5">天到期</span>
+              </>
+            )}
           </div>
-          {minDaysToExpiry !== 9999 && closestExpiryDate && (
+          {hasAnyExpiry && closestExpiryDate && (
             <span className="text-[9px] font-bold text-retro-text/40 mt-1">
               {closestExpiryDate.replace(/-/g, '/')}
+            </span>
+          )}
+          {showOpenedDateFallback && closestOpenedDate && (
+            <span className="text-[9px] font-bold text-retro-text/40 mt-1">
+              {closestOpenedDate.replace(/-/g, '/')} 開封
             </span>
           )}
         </div>
