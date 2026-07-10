@@ -4071,7 +4071,7 @@ function ProductCard({
 
       {/* Right Circle Expiry Indicator */}
       <div className="flex items-center gap-2 sm:gap-3 ml-2 flex-shrink-0">
-        <div className="flex flex-col items-center justify-center text-center">
+        <div className="flex flex-col items-center justify-center text-center min-w-[4.5rem]">
           <div className="w-12 h-12 rounded-full bg-stone-50 border border-retro-text/5 flex flex-col items-center justify-center">
             {showOpenedDateFallback ? (
               <>
@@ -4090,12 +4090,12 @@ function ProductCard({
             )}
           </div>
           {hasAnyExpiry && closestExpiryDate && (
-            <span className="text-[9px] font-bold text-retro-text/40 mt-1">
+            <span className="text-[9px] font-bold text-retro-text/40 mt-1 whitespace-nowrap">
               {closestExpiryDate.replace(/-/g, '/')}
             </span>
           )}
           {showOpenedDateFallback && closestOpenedDate && (
-            <span className="text-[9px] font-bold text-retro-text/40 mt-1">
+            <span className="text-[9px] font-bold text-retro-text/40 mt-1 whitespace-nowrap">
               {closestOpenedDate.replace(/-/g, '/')} 開封
             </span>
           )}
