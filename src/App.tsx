@@ -47,7 +47,7 @@ import {
   calculatePaoExpiry, 
   checkAllOpenedExpiredProducts 
 } from './utils';
-import { clearPrivateUserCache, imageCacheName, readUserCache, writeUserCache, type CachedUserData } from './localCache';
+import { clearPrivateUserCache, readUserCache, writeUserCache, type CachedUserData } from './localCache';
 
 performance.mark('app-start');
 
@@ -99,105 +99,14 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 
 
 // --- Cached Image Component ---
-// Keep decoded object URLs in memory so opening a detail view never repeats the
-// Cache Storage lookup/blob conversion already completed by the list card.
+// Keep the original URL in memory. The service worker owns the persistent
+// response cache, avoiding Cache Storage -> Blob -> object URL conversion.
 const memoryImageSources = new Map<string, string>();
-const memoryPreviewSources = new Map<string, string>();
-const pendingImageLoads = new Map<string, Promise<string>>();
-const pendingPreviewLoads = new Map<string, Promise<string | null>>();
-
-const previewCacheKey = (src: string) => {
-  const url = new URL(src);
-  url.searchParams.set('__cosmetics_preview', 'v1');
-  return url.toString();
-};
-
-const createPreviewBlob = async (source: Blob): Promise<Blob | null> => {
-  if (!('createImageBitmap' in window)) return null;
-  const bitmap = await createImageBitmap(source);
-  const maxSize = 96;
-  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.72));
-};
-
-const persistImagePreview = async (cache: Cache, src: string, source: Blob) => {
-  const key = previewCacheKey(src);
-  if (await cache.match(key)) return;
-  const preview = await createPreviewBlob(source);
-  if (preview) {
-    await cache.put(key, new Response(preview, {
-      headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'max-age=31536000, immutable' }
-    }));
-  }
-};
-
-const loadCachedPreview = (userId: string, src: string) => {
-  const key = `${userId}:${src}`;
-  const memorySource = memoryPreviewSources.get(key);
-  if (memorySource) return Promise.resolve(memorySource);
-  const pendingLoad = pendingPreviewLoads.get(key);
-  if (pendingLoad) return pendingLoad;
-
-  const load = (async () => {
-    if (!('caches' in window)) return null;
-    const cache = await caches.open(imageCacheName(userId));
-    const response = await cache.match(previewCacheKey(src));
-    if (!response) return null;
-    const objectUrl = URL.createObjectURL(await response.blob());
-    memoryPreviewSources.set(key, objectUrl);
-    return objectUrl;
-  })().finally(() => pendingPreviewLoads.delete(key));
-
-  pendingPreviewLoads.set(key, load);
-  return load;
-};
-
-const loadCachedImage = (userId: string, src: string) => {
-  const key = `${userId}:${src}`;
-  const memorySource = memoryImageSources.get(key);
-  if (memorySource) return Promise.resolve(memorySource);
-
-  const pendingLoad = pendingImageLoads.get(key);
-  if (pendingLoad) return pendingLoad;
-
-  const load = (async () => {
-    if (!('caches' in window)) return src;
-
-    const cache = await caches.open(imageCacheName(userId));
-    let response = await cache.match(src);
-    if (!response) {
-      response = await fetch(src, { mode: 'cors', cache: 'force-cache' });
-      if (!response.ok) throw new Error(`Image request failed: ${response.status}`);
-      await cache.put(src, response.clone());
-    }
-
-    const fullBlob = await response.blob();
-    void persistImagePreview(cache, src, fullBlob).catch(() => undefined);
-    const objectUrl = URL.createObjectURL(fullBlob);
-    memoryImageSources.set(key, objectUrl);
-    return objectUrl;
-  })().finally(() => pendingImageLoads.delete(key));
-
-  pendingImageLoads.set(key, load);
-  return load;
-};
 
 const clearMemoryImages = (userId: string) => {
-  for (const [key, source] of memoryImageSources) {
+  for (const key of memoryImageSources.keys()) {
     if (key.startsWith(`${userId}:`)) {
-      URL.revokeObjectURL(source);
       memoryImageSources.delete(key);
-    }
-  }
-  for (const [key, source] of memoryPreviewSources) {
-    if (key.startsWith(`${userId}:`)) {
-      URL.revokeObjectURL(source);
-      memoryPreviewSources.delete(key);
     }
   }
 };
@@ -251,7 +160,6 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
     if (!src || !isVisible) return; // ONLY load if visible
 
     if (src.startsWith('data:') || src.startsWith('blob:')) {
@@ -259,26 +167,9 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
       return;
     }
 
-    const loadImage = async () => {
-      if (!memoryImageSources.has(`${userId}:${src}`) && !thumbnail) {
-        const previewSource = await loadCachedPreview(userId, src).catch(() => null);
-        if (isMounted && previewSource) setCachedSrc(previewSource);
-      }
-      const loadedSource = await loadCachedImage(userId, src);
-      if (isMounted) setCachedSrc(loadedSource);
-    };
-
-    loadImage().catch(() => {
-        // Direct URL fallback preserves existing behaviour when CORS prevents
-        // Cache Storage from reading an older image.
-        memoryImageSources.set(`${userId}:${src}`, src);
-        if (isMounted) setCachedSrc(src);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [src, isVisible, userId, thumbnail]);
+    memoryImageSources.set(`${userId}:${src}`, src);
+    setCachedSrc(src);
+  }, [src, isVisible, userId]);
 
   return (
     <div ref={containerRef} className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
@@ -811,6 +702,36 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     const expired = checkAllOpenedExpiredProducts(products);
     setExpiredPaoItems(expired);
   }, [products]);
+
+  // Once the current screen is interactive, warm the first four images in each
+  // category one-by-one. The service worker persists these responses, so tab
+  // switches do not compete for network bandwidth or show empty first-screen cards.
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    let cancelled = false;
+    const urls = categories.flatMap((category) => products
+      .filter((product) => product.status === 'active' && product.category === category.id && product.photo)
+      .slice(0, 4)
+      .map((product) => product.photo!));
+    const uniqueUrls = Array.from(new Set<string>(urls as string[]));
+
+    const timeout = window.setTimeout(async () => {
+      for (const url of uniqueUrls) {
+        if (cancelled) return;
+        await new Promise<void>((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve();
+          image.onerror = () => resolve();
+          image.src = url;
+        });
+      }
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [isDataLoaded, user.uid]);
 
   useEffect(() => {
     // Initial scan for expired items

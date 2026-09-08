@@ -9,10 +9,10 @@ const pwaShellPlugin = () => ({
     const assets = ['./', './index.html', './manifest.json', './icon.png', ...Object.values(bundle)
       .map(({ fileName }) => `./${fileName}`)
       .filter((fileName) => !fileName.endsWith('.map'))];
-    const source = `const CACHE='cosmetics-shell-v2';const ASSETS=${JSON.stringify(assets)};
+    const source = `const CACHE='cosmetics-shell-v3';const ASSETS=${JSON.stringify(assets)};
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ns=>Promise.all(ns.filter(n=>n.startsWith('cosmetics-shell-')&&n!==CACHE).map(n=>caches.delete(n)))));self.clients.claim()});
-self.addEventListener('fetch',e=>{const r=e.request,u=new URL(r.url);if(r.method!=='GET'||u.origin!==self.location.origin)return;if(r.mode==='navigate'){e.respondWith(caches.match('./index.html').then(c=>c||fetch(r)));return}e.respondWith(caches.match(r).then(c=>c||fetch(r).then(x=>{if(x.ok)caches.open(CACHE).then(k=>k.put(r,x.clone()));return x})))})`;
+self.addEventListener('fetch',e=>{const r=e.request,u=new URL(r.url);if(r.method!=='GET')return;if(r.destination==='image'&&u.hostname==='firebasestorage.googleapis.com'){const m=decodeURIComponent(u.pathname).match(/\\/users\\/([^/]+)\\//);if(m){const c='cosmetics-thumbnails-v1-'+m[1];e.respondWith(caches.open(c).then(k=>k.match(r).then(x=>x||fetch(r).then(y=>{if(y.ok||y.type==='opaque')k.put(r,y.clone());return y}))));return}}if(u.origin!==self.location.origin)return;if(r.mode==='navigate'){e.respondWith(caches.match('./index.html').then(c=>c||fetch(r)));return}e.respondWith(caches.match(r).then(c=>c||fetch(r).then(x=>{if(x.ok)caches.open(CACHE).then(k=>k.put(r,x.clone()));return x})))})`;
     this.emitFile({ type: 'asset', fileName: 'sw.js', source });
   }
 });
