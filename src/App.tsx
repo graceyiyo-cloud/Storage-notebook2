@@ -99,8 +99,51 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 
 
 // --- Cached Image Component ---
+// Keep decoded object URLs in memory so opening a detail view never repeats the
+// Cache Storage lookup/blob conversion already completed by the list card.
+const memoryImageSources = new Map<string, string>();
+const pendingImageLoads = new Map<string, Promise<string>>();
+
+const loadCachedImage = (userId: string, src: string) => {
+  const key = `${userId}:${src}`;
+  const memorySource = memoryImageSources.get(key);
+  if (memorySource) return Promise.resolve(memorySource);
+
+  const pendingLoad = pendingImageLoads.get(key);
+  if (pendingLoad) return pendingLoad;
+
+  const load = (async () => {
+    if (!('caches' in window)) return src;
+
+    const cache = await caches.open(imageCacheName(userId));
+    let response = await cache.match(src);
+    if (!response) {
+      response = await fetch(src, { mode: 'cors', cache: 'force-cache' });
+      if (!response.ok) throw new Error(`Image request failed: ${response.status}`);
+      await cache.put(src, response.clone());
+    }
+
+    const objectUrl = URL.createObjectURL(await response.blob());
+    memoryImageSources.set(key, objectUrl);
+    return objectUrl;
+  })().finally(() => pendingImageLoads.delete(key));
+
+  pendingImageLoads.set(key, load);
+  return load;
+};
+
+const clearMemoryImages = (userId: string) => {
+  for (const [key, source] of memoryImageSources) {
+    if (key.startsWith(`${userId}:`)) {
+      URL.revokeObjectURL(source);
+      memoryImageSources.delete(key);
+    }
+  }
+};
+
 const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, onClick, ...props }: any) => {
-  const [cachedSrc, setCachedSrc] = useState<string | null>(null);
+  const memoryKey = `${userId}:${src}`;
+  const [cachedSrc, setCachedSrc] = useState<string | null>(() => memoryImageSources.get(memoryKey) || null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,7 +156,9 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
           observer.disconnect();
         }
       },
-      { rootMargin: '200px' } // Load slightly before it comes into view
+      // Preload roughly two mobile screens ahead. Images already on screen still
+      // enter first because the observer reports them before nearby rows.
+      { rootMargin: '1000px 0px' }
     );
 
     if (containerRef.current) {
@@ -132,33 +177,15 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
       return;
     }
 
-    const loadImg = async () => {
-      try {
-        if ('caches' in window) {
-          const cache = await caches.open(imageCacheName(userId));
-          const response = await cache.match(src);
-          if (response) {
-            const blob = await response.blob();
-            if (isMounted) setCachedSrc(URL.createObjectURL(blob));
-            return;
-          }
-          
-          if (isMounted) setCachedSrc(src);
-          
-          try {
-            const fetchResponse = await fetch(src, { mode: 'cors' });
-            if (fetchResponse.ok) {
-              await cache.put(src, fetchResponse.clone());
-            }
-          } catch(e) {}
-        } else {
-          if (isMounted) setCachedSrc(src);
-        }
-      } catch (err) {
+    loadCachedImage(userId, src)
+      .then((loadedSource) => {
+        if (isMounted) setCachedSrc(loadedSource);
+      })
+      .catch(() => {
+        // Direct URL fallback preserves existing behaviour when CORS prevents
+        // Cache Storage from reading an older image.
         if (isMounted) setCachedSrc(src);
-      }
-    };
-    loadImg();
+      });
 
     return () => {
       isMounted = false;
@@ -180,6 +207,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
           src={cachedSrc}
           alt={alt}
           loading="lazy"
+          fetchPriority="high"
           className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 relative z-10 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setIsLoaded(true)}
           referrerPolicy="no-referrer"
@@ -2724,6 +2752,7 @@ ${categoryOptions}
 
                   <div className="mt-2">
                   <button onClick={async () => {
+                    clearMemoryImages(user.uid);
                     await clearPrivateUserCache(user.uid);
                     await logOut();
                   }} className="w-full p-4 bg-red-50 border border-red-100 rounded-2xl shadow-sm hover:border-red-200 transition-all flex items-center justify-center group cursor-pointer">
