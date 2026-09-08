@@ -204,9 +204,10 @@ const clearMemoryImages = (userId: string) => {
 
 const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, onClick, ...props }: any) => {
   const memoryKey = `${userId}:${src}`;
-  const [cachedSrc, setCachedSrc] = useState<string | null>(() => memoryImageSources.get(memoryKey) || null);
+  const initialMemorySource = memoryImageSources.get(memoryKey) || null;
+  const [cachedSrc, setCachedSrc] = useState<string | null>(initialMemorySource);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(Boolean(initialMemorySource));
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -274,6 +275,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
           alt={alt}
           loading="lazy"
           fetchPriority="high"
+          decoding="async"
           className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 relative z-10 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setIsLoaded(true)}
           referrerPolicy="no-referrer"
