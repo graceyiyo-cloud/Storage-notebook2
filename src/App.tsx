@@ -1939,14 +1939,14 @@ ${categoryOptions}
   };
 
   const currentSearchCategory = categories.find(category => category.id === currentTab);
+  const usedSearchSubcategories = Array.from(new Set(products
+    .filter(product => product.status === 'active' && product.category === currentTab && product.subcategory)
+    .map(product => product.subcategory)));
   const availableSearchSubcategories = currentSearchCategory
-    ? Array.from(new Set([
-        ...currentSearchCategory.subcategories,
-        ...products
-          .filter(product => product.status === 'active' && product.category === currentTab)
-          .map(product => product.subcategory)
-          .filter(Boolean),
-      ]))
+    ? [
+        ...currentSearchCategory.subcategories.filter(subcategory => usedSearchSubcategories.includes(subcategory)),
+        ...usedSearchSubcategories.filter(subcategory => !currentSearchCategory.subcategories.includes(subcategory)),
+      ]
     : [];
   const hasSearchFilter = Boolean(searchKeyword.trim() || selectedSearchSubcategory);
 
@@ -2240,7 +2240,7 @@ ${categoryOptions}
                 </button>
               )}
             </div>
-            {currentSearchCategory && (
+            {currentSearchCategory && availableSearchSubcategories.length > 0 && (
               <div className="relative w-32 shrink-0 sm:w-44">
                 <select
                   value={selectedSearchSubcategory}
