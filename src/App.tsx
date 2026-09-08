@@ -2220,12 +2220,12 @@ ${categoryOptions}
 
         {/* 3. Search Bar */}
         {currentTab !== 'settings' && (
-          <div className="mb-5 flex flex-col gap-2 sm:flex-row">
-            <div className="relative flex-1">
+          <div className="mb-5 flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-retro-text/40 w-4.5 h-4.5" />
               <input
                 type="text"
-                placeholder="搜尋品牌、產品或小分類..."
+                placeholder="搜尋品牌或產品..."
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
                 className="w-full pl-11 pr-10 py-3 bg-retro-card rounded-2xl text-sm border border-retro-text/5 focus:outline-none focus:ring-1 focus:ring-retro-primary shadow-inner text-retro-text font-medium"
@@ -2241,11 +2241,11 @@ ${categoryOptions}
               )}
             </div>
             {currentSearchCategory && (
-              <div className="relative sm:w-48">
+              <div className="relative w-32 shrink-0 sm:w-44">
                 <select
                   value={selectedSearchSubcategory}
                   onChange={(event) => setSelectedSearchSubcategory(event.target.value)}
-                  className="w-full appearance-none bg-retro-card rounded-2xl border border-retro-text/5 py-3 pl-4 pr-10 text-sm font-medium text-retro-text shadow-inner focus:outline-none focus:ring-1 focus:ring-retro-primary"
+                  className="w-full appearance-none truncate bg-retro-card rounded-2xl border border-retro-text/5 py-3 pl-3 pr-8 text-sm font-medium text-retro-text shadow-inner focus:outline-none focus:ring-1 focus:ring-retro-primary"
                   aria-label="選擇子分類"
                 >
                   <option value="">全部子分類</option>
@@ -2253,7 +2253,7 @@ ${categoryOptions}
                     <option key={subcategory} value={subcategory}>{subcategory}</option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-retro-text/50" />
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-retro-text/50" />
               </div>
             )}
           </div>
