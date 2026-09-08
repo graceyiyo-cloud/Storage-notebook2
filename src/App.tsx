@@ -271,6 +271,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
     loadImage().catch(() => {
         // Direct URL fallback preserves existing behaviour when CORS prevents
         // Cache Storage from reading an older image.
+        memoryImageSources.set(`${userId}:${src}`, src);
         if (isMounted) setCachedSrc(src);
       });
 
@@ -2145,9 +2146,18 @@ ${categoryOptions}
     setProducts((currentProducts) => {
       const product = currentProducts.find((item) => item.id === productId);
       if (!product || product.photoThumbnail) return currentProducts;
-      return currentProducts.map((item) => item.id === productId
+      const nextProducts = currentProducts.map((item) => item.id === productId
         ? { ...item, photoThumbnail: preview }
         : item);
+      // Make the generated preview available on the very next launch even if
+      // the cloud write is still completing when Android suspends the PWA.
+      writeUserCache(user.uid, {
+        categories,
+        capacityUnits,
+        products: nextProducts,
+        syncedAt: lastSyncedAt || new Date().toISOString()
+      });
+      return nextProducts;
     });
   };
 
