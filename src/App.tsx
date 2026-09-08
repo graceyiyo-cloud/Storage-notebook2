@@ -102,7 +102,60 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 // Keep decoded object URLs in memory so opening a detail view never repeats the
 // Cache Storage lookup/blob conversion already completed by the list card.
 const memoryImageSources = new Map<string, string>();
+const memoryPreviewSources = new Map<string, string>();
 const pendingImageLoads = new Map<string, Promise<string>>();
+const pendingPreviewLoads = new Map<string, Promise<string | null>>();
+
+const previewCacheKey = (src: string) => {
+  const url = new URL(src);
+  url.searchParams.set('__cosmetics_preview', 'v1');
+  return url.toString();
+};
+
+const createPreviewBlob = async (source: Blob): Promise<Blob | null> => {
+  if (!('createImageBitmap' in window)) return null;
+  const bitmap = await createImageBitmap(source);
+  const maxSize = 96;
+  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.72));
+};
+
+const persistImagePreview = async (cache: Cache, src: string, source: Blob) => {
+  const key = previewCacheKey(src);
+  if (await cache.match(key)) return;
+  const preview = await createPreviewBlob(source);
+  if (preview) {
+    await cache.put(key, new Response(preview, {
+      headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'max-age=31536000, immutable' }
+    }));
+  }
+};
+
+const loadCachedPreview = (userId: string, src: string) => {
+  const key = `${userId}:${src}`;
+  const memorySource = memoryPreviewSources.get(key);
+  if (memorySource) return Promise.resolve(memorySource);
+  const pendingLoad = pendingPreviewLoads.get(key);
+  if (pendingLoad) return pendingLoad;
+
+  const load = (async () => {
+    if (!('caches' in window)) return null;
+    const cache = await caches.open(imageCacheName(userId));
+    const response = await cache.match(previewCacheKey(src));
+    if (!response) return null;
+    const objectUrl = URL.createObjectURL(await response.blob());
+    memoryPreviewSources.set(key, objectUrl);
+    return objectUrl;
+  })().finally(() => pendingPreviewLoads.delete(key));
+
+  pendingPreviewLoads.set(key, load);
+  return load;
+};
 
 const loadCachedImage = (userId: string, src: string) => {
   const key = `${userId}:${src}`;
@@ -123,7 +176,9 @@ const loadCachedImage = (userId: string, src: string) => {
       await cache.put(src, response.clone());
     }
 
-    const objectUrl = URL.createObjectURL(await response.blob());
+    const fullBlob = await response.blob();
+    void persistImagePreview(cache, src, fullBlob).catch(() => undefined);
+    const objectUrl = URL.createObjectURL(fullBlob);
     memoryImageSources.set(key, objectUrl);
     return objectUrl;
   })().finally(() => pendingImageLoads.delete(key));
@@ -137,6 +192,12 @@ const clearMemoryImages = (userId: string) => {
     if (key.startsWith(`${userId}:`)) {
       URL.revokeObjectURL(source);
       memoryImageSources.delete(key);
+    }
+  }
+  for (const [key, source] of memoryPreviewSources) {
+    if (key.startsWith(`${userId}:`)) {
+      URL.revokeObjectURL(source);
+      memoryPreviewSources.delete(key);
     }
   }
 };
@@ -177,11 +238,16 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
       return;
     }
 
-    loadCachedImage(userId, src)
-      .then((loadedSource) => {
-        if (isMounted) setCachedSrc(loadedSource);
-      })
-      .catch(() => {
+    const loadImage = async () => {
+      if (!memoryImageSources.has(`${userId}:${src}`) && !thumbnail) {
+        const previewSource = await loadCachedPreview(userId, src).catch(() => null);
+        if (isMounted && previewSource) setCachedSrc(previewSource);
+      }
+      const loadedSource = await loadCachedImage(userId, src);
+      if (isMounted) setCachedSrc(loadedSource);
+    };
+
+    loadImage().catch(() => {
         // Direct URL fallback preserves existing behaviour when CORS prevents
         // Cache Storage from reading an older image.
         if (isMounted) setCachedSrc(src);
@@ -190,7 +256,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
     return () => {
       isMounted = false;
     };
-  }, [src, isVisible, userId]);
+  }, [src, isVisible, userId, thumbnail]);
 
   return (
     <div ref={containerRef} className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
