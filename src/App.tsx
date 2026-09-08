@@ -202,13 +202,33 @@ const clearMemoryImages = (userId: string) => {
   }
 };
 
-const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, onClick, ...props }: any) => {
+const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, onClick, onPreviewReady, ...props }: any) => {
   const memoryKey = `${userId}:${src}`;
   const initialMemorySource = memoryImageSources.get(memoryKey) || null;
   const [cachedSrc, setCachedSrc] = useState<string | null>(initialMemorySource);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isVisible, setIsVisible] = useState(Boolean(initialMemorySource));
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewGeneratedRef = useRef(false);
+
+  const handleImageLoad = async (event: React.SyntheticEvent<HTMLImageElement>) => {
+    setIsLoaded(true);
+    if (thumbnail || !onPreviewReady || previewGeneratedRef.current) return;
+    previewGeneratedRef.current = true;
+    try {
+      const image = event.currentTarget;
+      const maxSize = 96;
+      const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+      onPreviewReady(canvas.toDataURL('image/webp', 0.72));
+    } catch {
+      // Some legacy third-party URLs disallow canvas access. Their Cache Storage
+      // preview remains the fallback and existing product data is left untouched.
+    }
+  };
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -262,7 +282,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
   return (
     <div ref={containerRef} className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
       {!isLoaded && thumbnail && (
-        <img src={thumbnail} alt="thumbnail" loading="lazy" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} blur-md opacity-50 scale-105 transition-opacity duration-300`} />
+        <img src={thumbnail} alt="thumbnail" className={`absolute inset-0 ${imageClassName || 'w-full h-full object-contain'} opacity-100 transition-opacity duration-300`} />
       )}
       {!isLoaded && !thumbnail && (
         <div className="absolute inset-0 flex items-center justify-center bg-stone-100/50 rounded-lg animate-pulse">
@@ -277,7 +297,7 @@ const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, o
           fetchPriority="high"
           decoding="async"
           className={`${imageClassName || 'w-full h-full object-contain'} transition-opacity duration-300 relative z-10 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-          onLoad={() => setIsLoaded(true)}
+          onLoad={handleImageLoad}
           referrerPolicy="no-referrer"
           {...props}
         />
@@ -2121,6 +2141,16 @@ ${categoryOptions}
   const currentFormCategoryObj = categories.find(c => c.id === formCategory);
   const currentFormSubcategories = currentFormCategoryObj ? currentFormCategoryObj.subcategories : [];
 
+  const handlePreviewReady = (productId: string, preview: string) => {
+    setProducts((currentProducts) => {
+      const product = currentProducts.find((item) => item.id === productId);
+      if (!product || product.photoThumbnail) return currentProducts;
+      return currentProducts.map((item) => item.id === productId
+        ? { ...item, photoThumbnail: preview }
+        : item);
+    });
+  };
+
   if (!isDataLoaded) {
     return (
       <div className="min-h-screen bg-retro-bg flex items-center justify-center font-sans">
@@ -3299,6 +3329,7 @@ ${categoryOptions}
                         <div key={prod.id}>
                           <ProductCard 
                               userId={user.uid}
+                              onPreviewReady={handlePreviewReady}
                               product={prod} 
                               onViewDetail={() => {}}
                               onEdit={handleEditInstanceTrigger}
@@ -3379,6 +3410,7 @@ ${categoryOptions}
                       <div key={prod.id}>
                         <ProductCard 
                           userId={user.uid}
+                          onPreviewReady={handlePreviewReady}
                           product={prod} 
                           onViewDetail={setSelectedDetailProduct}
                           onEdit={handleEditInstanceTrigger}
@@ -3471,6 +3503,7 @@ ${categoryOptions}
                             <div key={prod.id}>
                               <ProductCard 
                               userId={user.uid}
+                              onPreviewReady={handlePreviewReady}
                               product={prod} 
                               onViewDetail={setSelectedDetailProduct}
                               onEdit={handleEditInstanceTrigger}
@@ -4137,6 +4170,7 @@ ${categoryOptions}
 // Compact Single Product Card Component (Requirement 1: Click outside total card triggers complete detail view)
 function ProductCard({ 
   userId,
+  onPreviewReady,
   product, 
   onViewDetail,
   onEdit, 
@@ -4148,6 +4182,7 @@ function ProductCard({
   onRestoreMaster
 }: { 
   userId: string;
+  onPreviewReady?: (productId: string, preview: string) => void;
   product: Product; 
   onViewDetail: (prod: Product) => void; 
   onEdit: (prod: Product, inst: ProductInstance) => void;
@@ -4233,6 +4268,7 @@ function ProductCard({
             <CachedImage
               src={product.photo}
               userId={userId}
+              onPreviewReady={(preview: string) => onPreviewReady?.(product.id, preview)}
               thumbnail={product.photoThumbnail} 
               alt={product.name}
               onClick={(e: React.MouseEvent) => {
