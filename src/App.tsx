@@ -483,6 +483,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   });
 
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [selectedSearchSubcategory, setSelectedSearchSubcategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set(['prod_1']));
@@ -750,6 +751,10 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
       }
     }
   }, [categories, currentTab, isDataLoaded]);
+
+  useEffect(() => {
+    setSelectedSearchSubcategory('');
+  }, [currentTab]);
 
   // Handle Usage status switch - auto fill open date if usage is '使用中' and it is blank
   useEffect(() => {
@@ -1933,10 +1938,27 @@ ${categoryOptions}
 
   };
 
+  const currentSearchCategory = categories.find(category => category.id === currentTab);
+  const availableSearchSubcategories = currentSearchCategory
+    ? Array.from(new Set([
+        ...currentSearchCategory.subcategories,
+        ...products
+          .filter(product => product.status === 'active' && product.category === currentTab)
+          .map(product => product.subcategory)
+          .filter(Boolean),
+      ]))
+    : [];
+  const hasSearchFilter = Boolean(searchKeyword.trim() || selectedSearchSubcategory);
+
   const activeProducts = products.filter(prod => {
-    if (searchKeyword.trim()) {
+    if (hasSearchFilter) {
       if (prod.status !== 'active') return false;
-      const term = searchKeyword.toLowerCase();
+      if (selectedSearchSubcategory && (
+        prod.category !== currentTab || prod.subcategory !== selectedSearchSubcategory
+      )) return false;
+      if (!searchKeyword.trim()) return true;
+
+      const term = searchKeyword.trim().toLowerCase();
       const catName = categories.find(c => c.id === prod.category)?.name || '';
       return (
         prod.brand.toLowerCase().includes(term) ||
@@ -2198,22 +2220,41 @@ ${categoryOptions}
 
         {/* 3. Search Bar */}
         {currentTab !== 'settings' && (
-          <div className="relative mb-5">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-retro-text/40 w-4.5 h-4.5" />
-            <input 
-              type="text" 
-              placeholder="搜尋品牌、產品或小分類..."
-              value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-retro-card rounded-2xl text-sm border border-retro-text/5 focus:outline-none focus:ring-1 focus:ring-retro-primary shadow-inner text-retro-text font-medium"
-            />
-            {searchKeyword && (
-              <button 
-                onClick={() => setSearchKeyword('')} 
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-retro-text/50 hover:text-retro-text p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <div className="mb-5 flex flex-col gap-2 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-retro-text/40 w-4.5 h-4.5" />
+              <input
+                type="text"
+                placeholder="搜尋品牌、產品或小分類..."
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                className="w-full pl-11 pr-10 py-3 bg-retro-card rounded-2xl text-sm border border-retro-text/5 focus:outline-none focus:ring-1 focus:ring-retro-primary shadow-inner text-retro-text font-medium"
+              />
+              {searchKeyword && (
+                <button
+                  onClick={() => setSearchKeyword('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-retro-text/50 hover:text-retro-text p-1"
+                  aria-label="清除搜尋文字"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {currentSearchCategory && (
+              <div className="relative sm:w-48">
+                <select
+                  value={selectedSearchSubcategory}
+                  onChange={(event) => setSelectedSearchSubcategory(event.target.value)}
+                  className="w-full appearance-none bg-retro-card rounded-2xl border border-retro-text/5 py-3 pl-4 pr-10 text-sm font-medium text-retro-text shadow-inner focus:outline-none focus:ring-1 focus:ring-retro-primary"
+                  aria-label="選擇子分類"
+                >
+                  <option value="">全部子分類</option>
+                  {availableSearchSubcategories.map(subcategory => (
+                    <option key={subcategory} value={subcategory}>{subcategory}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-retro-text/50" />
+              </div>
             )}
           </div>
         )}
@@ -3292,7 +3333,7 @@ ${categoryOptions}
           /* =================== MAIN LIST VIEW =================== */
           <div className="space-y-4">
             {/* Category Stats Indicator */}
-            {!searchKeyword.trim() ? (
+            {!hasSearchFilter ? (
               <div className="flex justify-between items-center mb-1 bg-retro-card/40 px-3.5 py-2.5 rounded-xl border border-retro-text/5 text-xs text-retro-text">
                 <span className="font-bold text-retro-text/80">
                   分類：{categories.find(c => c.id === currentTab)?.name || ''}
@@ -3321,7 +3362,7 @@ ${categoryOptions}
             {/* Subcategory Nested Product List */}
             {(() => {
               // If searching, render flat list
-              if (searchKeyword.trim()) {
+              if (hasSearchFilter) {
                 if (activeProducts.length === 0) {
                   return (
                     <div className="text-center py-12 bg-retro-card rounded-2xl border border-retro-text/10">
