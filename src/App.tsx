@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc, getDocs, collection, deleteField, updateDoc, query } from 'firebase/firestore';
+import { doc, getDocFromServer, setDoc, deleteDoc, getDocs, getDocsFromServer, collection, deleteField, updateDoc, query } from 'firebase/firestore';
 import { auth, db, storage, signInWithGoogle, logOut } from './firebase';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { 
@@ -47,6 +47,9 @@ import {
   calculatePaoExpiry, 
   checkAllOpenedExpiredProducts 
 } from './utils';
+import { clearPrivateUserCache, imageCacheName, readUserCache, writeUserCache, type CachedUserData } from './localCache';
+
+performance.mark('app-start');
 
 // Helper function to extract cropped image as base64
 const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<string> => {
@@ -96,7 +99,7 @@ const getCroppedImg = async (image: HTMLImageElement, crop: PixelCrop): Promise<
 
 
 // --- Cached Image Component ---
-const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, ...props }: any) => {
+const CachedImage = ({ src, thumbnail, alt, userId, className, imageClassName, onClick, ...props }: any) => {
   const [cachedSrc, setCachedSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -132,7 +135,7 @@ const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, 
     const loadImg = async () => {
       try {
         if ('caches' in window) {
-          const cache = await caches.open('product-images-v2');
+          const cache = await caches.open(imageCacheName(userId));
           const response = await cache.match(src);
           if (response) {
             const blob = await response.blob();
@@ -145,7 +148,7 @@ const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, 
           try {
             const fetchResponse = await fetch(src, { mode: 'cors' });
             if (fetchResponse.ok) {
-              cache.put(src, fetchResponse.clone());
+              await cache.put(src, fetchResponse.clone());
             }
           } catch(e) {}
         } else {
@@ -160,7 +163,7 @@ const CachedImage = ({ src, thumbnail, alt, className, imageClassName, onClick, 
     return () => {
       isMounted = false;
     };
-  }, [src, isVisible]);
+  }, [src, isVisible, userId]);
 
   return (
     <div ref={containerRef} className={`relative ${className || ''} overflow-hidden`} onClick={onClick}>
@@ -206,46 +209,53 @@ function CategoryIcon({ name, className = "w-5 h-5" }: { name: string; className
 
 const APP_VERSION = "2.0v";
 
-function MainApp({ user }: { user: User }) {
+function MainApp({ user }: { user: User; key?: React.Key }) {
+  const initialCacheRef = useRef<CachedUserData | null>(readUserCache(user.uid));
+  const initialCache = initialCacheRef.current;
   // --- Core State ---
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [capacityUnits, setCapacityUnits] = useState<string[]>(INITIAL_CAPACITY_UNITS);
+  const [categories, setCategories] = useState<Category[]>(initialCache?.categories || []);
+  const [capacityUnits, setCapacityUnits] = useState<string[]>(initialCache?.capacityUnits || INITIAL_CAPACITY_UNITS);
 
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(initialCache?.products || []);
 
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(Boolean(initialCache));
+  const [syncState, setSyncState] = useState<'refreshing' | 'current' | 'stale'>(initialCache ? 'refreshing' : 'refreshing');
+  const [lastSyncedAt, setLastSyncedAt] = useState(initialCache?.syncedAt || '');
+  const [refreshToken, setRefreshToken] = useState(0);
+  const lastSyncedSignatureRef = useRef(initialCache ? JSON.stringify({
+    categories: initialCache.categories,
+    capacityUnits: initialCache.capacityUnits,
+    products: initialCache.products
+  }) : '');
+  const hasLocalEditsRef = useRef(false);
 
   // Load user data from Firestore on mount
   useEffect(() => {
     const loadUserData = async () => {
       try {
         const docRef = doc(db, 'users', user.uid);
-        const docSnap = await getDoc(docRef);
+        const productsRef = collection(db, 'users', user.uid, 'products');
+        performance.mark('cloud-refresh-start');
+        const [docSnap, querySnapshot] = await Promise.all([
+          getDocFromServer(docRef),
+          getDocsFromServer(query(productsRef))
+        ]);
+        performance.mark('cloud-refresh-end');
+        performance.measure('cloud-refresh', 'cloud-refresh-start', 'cloud-refresh-end');
         let loadedCategories = INITIAL_CATEGORIES;
         
         let rootProducts: Product[] = [];
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data.capacityUnits) setCapacityUnits(data.capacityUnits);
           if (data.categories) {
             loadedCategories = data.categories;
-            setCategories(data.categories);
-          } else {
-            setCategories(INITIAL_CATEGORIES);
           }
           
           // Legacy migration check: if products exist in the root doc, save them for merging
           if (data.products && data.products.length > 0) {
             rootProducts = data.products;
           }
-        } else {
-          setCategories(INITIAL_CATEGORIES);
         }
-        
-        // Load products from subcollection
-        const productsRef = collection(db, 'users', user.uid, 'products');
-        const q = query(productsRef);
-        const querySnapshot = await getDocs(q);
         
         let subProducts: Product[] = [];
         if (!querySnapshot.empty) {
@@ -274,24 +284,62 @@ function MainApp({ user }: { user: User }) {
              }
           });
           
-          setProducts(Array.from(mergedMap.values()));
+          rootProducts = Array.from(mergedMap.values());
         } else if (!docSnap.exists()) {
           // If no user doc exists and no products exist, initialize with defaults
-          setProducts(INITIAL_PRODUCTS);
+          rootProducts = INITIAL_PRODUCTS;
         }
-
+        const nextCategories = loadedCategories;
+        const nextCapacityUnits = docSnap.exists() && docSnap.data().capacityUnits
+          ? docSnap.data().capacityUnits
+          : INITIAL_CAPACITY_UNITS;
+        const nextProducts = rootProducts.length > 0 ? rootProducts : subProducts;
+        const syncedAt = new Date().toISOString();
+        const nextData = { categories: nextCategories, capacityUnits: nextCapacityUnits, products: nextProducts };
+        if (hasLocalEditsRef.current) {
+          console.info('[startup] Cloud refresh skipped because local edits are being saved');
+          return;
+        }
+        lastSyncedSignatureRef.current = JSON.stringify(nextData);
+        setCategories(nextCategories);
+        setCapacityUnits(nextCapacityUnits);
+        setProducts(nextProducts);
+        setLastSyncedAt(syncedAt);
+        writeUserCache(user.uid, { ...nextData, syncedAt });
+        setSyncState('current');
+        console.info('[startup] Cloud refresh completed', performance.getEntriesByName('cloud-refresh').at(-1)?.duration);
       } catch (err) {
         console.error('Error loading data', err);
+        setSyncState('stale');
       } finally {
         setIsDataLoaded(true);
       }
     };
     loadUserData();
-  }, [user.uid]);
+  }, [user.uid, refreshToken]);
+
+  useEffect(() => {
+    const handleOffline = () => setSyncState('stale');
+    const handleOnline = () => {
+      setSyncState('refreshing');
+      setRefreshToken((value) => value + 1);
+    };
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    if (!navigator.onLine) handleOffline();
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
 
   // Save to Firestore whenever data changes (debounce or just save directly since it's simple)
   useEffect(() => {
     if (!isDataLoaded) return;
+    const signature = JSON.stringify({ categories, capacityUnits, products });
+    if (signature === lastSyncedSignatureRef.current) return;
+    hasLocalEditsRef.current = true;
+    const timeout = window.setTimeout(() => {
     const saveUserData = async () => {
       try {
         const userRef = doc(db, 'users', user.uid);
@@ -337,13 +385,22 @@ function MainApp({ user }: { user: User }) {
           products: deleteField()
         }).catch(() => { /* ignore if field doesn't exist */ });
 
+        const syncedAt = new Date().toISOString();
+        lastSyncedSignatureRef.current = signature;
+        hasLocalEditsRef.current = false;
+        setLastSyncedAt(syncedAt);
+        setSyncState('current');
+        writeUserCache(user.uid, { categories, capacityUnits, products, syncedAt });
+
       } catch (err: any) {
         console.error('Error saving data', err);
         showToast(`儲存失敗: ${err.message || String(err)}`);
       }
     };
     saveUserData();
-  }, [categories, products, capacityUnits, isDataLoaded, user.uid]);
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [categories, products, capacityUnits, isDataLoaded, user.uid, refreshToken]);
 
   const [apiKeys, setApiKeys] = useState<string[]>(() => {
     let keys = ['', '', ''];
@@ -774,7 +831,10 @@ function MainApp({ user }: { user: User }) {
             showToast('上傳圖片中...');
             try {
               const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.webp`);
-              await uploadString(storageRef, compressedBase64, 'data_url');
+              await uploadString(storageRef, compressedBase64, 'data_url', {
+                contentType: 'image/webp',
+                cacheControl: 'public,max-age=31536000,immutable'
+              });
               const downloadURL = await getDownloadURL(storageRef);
               setFormPhoto(downloadURL);
               setFormPhotoThumbnail(thumbBase64);
@@ -1895,8 +1955,8 @@ ${categoryOptions}
   // LocalStorage Double Backup
   useEffect(() => {
     if (isDataLoaded) {
-       localStorage.setItem('cosmetics_backup_categories', JSON.stringify(categories));
-       localStorage.setItem('cosmetics_backup_products', JSON.stringify(products));
+       localStorage.setItem(`cosmetics_backup_categories_${user.uid}`, JSON.stringify(categories));
+       localStorage.setItem(`cosmetics_backup_products_${user.uid}`, JSON.stringify(products));
     }
   }, [categories, products, isDataLoaded]);
 
@@ -1937,8 +1997,8 @@ ${categoryOptions}
           
           // Force save to localStorage immediately
           target.value = ""; // clear input
-          localStorage.setItem('cosmetics_backup_categories', JSON.stringify(json.categories));
-          localStorage.setItem('cosmetics_backup_products', JSON.stringify(json.products));
+          localStorage.setItem(`cosmetics_backup_categories_${user.uid}`, JSON.stringify(json.categories));
+          localStorage.setItem(`cosmetics_backup_products_${user.uid}`, JSON.stringify(json.products));
           
           if (user) {
              const userRef = doc(db, 'users', user.uid);
@@ -1979,8 +2039,15 @@ ${categoryOptions}
   return (
 
       <div className="min-h-screen bg-retro-bg text-retro-text relative pb-24 font-sans select-none antialiased">
+      {syncState !== 'current' && (
+        <div className={`sticky top-0 z-50 px-4 py-2 text-center text-xs font-semibold border-b ${syncState === 'stale' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-retro-card text-retro-text/70 border-retro-text/10'}`} role="status">
+          {syncState === 'stale'
+            ? `目前離線或無法連線，顯示上次同步內容${lastSyncedAt ? `（${new Date(lastSyncedAt).toLocaleString()}）` : ''}，尚未更新。`
+            : '已顯示本機內容，正在背景同步最新資料…'}
+        </div>
+      )}
       {/* 1. App Header */}
-      <header className="px-5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky top-0 z-40 border-b border-retro-text/10 max-w-2xl mx-auto">
+      <header className={`px-5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky z-40 border-b border-retro-text/10 max-w-2xl mx-auto ${syncState === 'current' ? 'top-0' : 'top-8'}`}>
         <h1 className="text-2xl font-bold font-display tracking-tight flex items-center gap-2">
           <span>用品管理系統</span>
         </h1>
@@ -2656,7 +2723,10 @@ ${categoryOptions}
                   </button>
 
                   <div className="mt-2">
-                    <button onClick={logOut} className="w-full p-4 bg-red-50 border border-red-100 rounded-2xl shadow-sm hover:border-red-200 transition-all flex items-center justify-center group cursor-pointer">
+                  <button onClick={async () => {
+                    await clearPrivateUserCache(user.uid);
+                    await logOut();
+                  }} className="w-full p-4 bg-red-50 border border-red-100 rounded-2xl shadow-sm hover:border-red-200 transition-all flex items-center justify-center group cursor-pointer">
                       <span className="font-bold text-red-600 text-sm">登出帳號</span>
                     </button>
                   </div>
@@ -3131,6 +3201,7 @@ ${categoryOptions}
                       {archivedProducts.map(prod => (
                         <div key={prod.id}>
                           <ProductCard 
+                              userId={user.uid}
                               product={prod} 
                               onViewDetail={() => {}}
                               onEdit={handleEditInstanceTrigger}
@@ -3210,6 +3281,7 @@ ${categoryOptions}
       .map(prod => (
                       <div key={prod.id}>
                         <ProductCard 
+                          userId={user.uid}
                           product={prod} 
                           onViewDetail={setSelectedDetailProduct}
                           onEdit={handleEditInstanceTrigger}
@@ -3301,6 +3373,7 @@ ${categoryOptions}
                           {groupProds.map(prod => (
                             <div key={prod.id}>
                               <ProductCard 
+                              userId={user.uid}
                               product={prod} 
                               onViewDetail={setSelectedDetailProduct}
                               onEdit={handleEditInstanceTrigger}
@@ -3361,6 +3434,7 @@ ${categoryOptions}
               {selectedDetailProduct.photo ? (
                 <CachedImage
                   src={selectedDetailProduct.photo}
+                  userId={user.uid}
                   thumbnail={selectedDetailProduct.photoThumbnail} 
                   alt={selectedDetailProduct.name}
                   onClick={() => setFullscreenImage(selectedDetailProduct.photo!)}
@@ -3945,6 +4019,7 @@ ${categoryOptions}
         >
           <CachedImage
             src={fullscreenImage} 
+            userId={user.uid}
             alt="Fullscreen preview" 
             className="w-full h-full flex items-center justify-center"
             imageClassName="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-slide-up"
@@ -3964,6 +4039,7 @@ ${categoryOptions}
 
 // Compact Single Product Card Component (Requirement 1: Click outside total card triggers complete detail view)
 function ProductCard({ 
+  userId,
   product, 
   onViewDetail,
   onEdit, 
@@ -3974,6 +4050,7 @@ function ProductCard({
   onDeleteMaster,
   onRestoreMaster
 }: { 
+  userId: string;
   product: Product; 
   onViewDetail: (prod: Product) => void; 
   onEdit: (prod: Product, inst: ProductInstance) => void;
@@ -4058,6 +4135,7 @@ function ProductCard({
           {product.photo ? (
             <CachedImage
               src={product.photo}
+              userId={userId}
               thumbnail={product.photoThumbnail} 
               alt={product.name}
               onClick={(e: React.MouseEvent) => {
@@ -4201,11 +4279,20 @@ function ClockIcon({ className = "w-4 h-4" }: { className?: string }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const previousUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      const previousUserId = previousUserIdRef.current;
+      if (previousUserId && previousUserId !== currentUser?.uid) {
+        await clearPrivateUserCache(previousUserId);
+      }
+      previousUserIdRef.current = currentUser?.uid || null;
       setUser(currentUser);
       setLoading(false);
+      performance.mark('auth-state-ready');
+      performance.measure('auth-state', 'app-start', 'auth-state-ready');
+      console.info('[startup] Auth state ready', performance.getEntriesByName('auth-state').at(-1)?.duration);
     });
     return unsubscribe;
   }, []);
@@ -4252,5 +4339,5 @@ export default function App() {
     );
   }
 
-  return <MainApp user={user} />;
+  return <MainApp key={user.uid} user={user} />;
 }
