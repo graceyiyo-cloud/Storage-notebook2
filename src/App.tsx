@@ -585,6 +585,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     : fullscreenImage ? '#image' 
     : showAddForm ? '#add'
     : selectedDetailProduct ? '#detail'
+    : (currentTab !== 'settings' && (searchKeyword.trim() || selectedSearchSubcategory)) ? '#filter'
     : (currentTab === 'settings' && settingsView === 'category') ? '#settings-category'
     : (currentTab === 'settings' && settingsView === 'units') ? '#settings-units'
     : (currentTab === 'settings' && settingsView === 'history') ? '#settings-history'
@@ -597,7 +598,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     if (hash === '#confirm') return 5;
     if (hash === '#crop' || hash === '#image') return 4;
     if (hash === '#add' || hash === '#detail') return 3;
-    if (hash.startsWith('#settings-')) return 2;
+    if (hash === '#filter' || hash.startsWith('#settings-')) return 2;
     return 1;
   };
 
@@ -637,7 +638,15 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
         setFullscreenImage(null);
         setShowAddForm(false);
         setSelectedDetailProduct(null);
+        setSearchKeyword('');
+        setSelectedSearchSubcategory('');
         if (settingsView !== 'menu') setSettingsView('menu');
+      } else if (hash === '#filter') {
+        setConfirmDialog(null);
+        setCropImageSrc(null);
+        setFullscreenImage(null);
+        setShowAddForm(false);
+        setSelectedDetailProduct(null);
       } else if (hash === '#settings-category') {
         setConfirmDialog(null);
         setCropImageSrc(null);
