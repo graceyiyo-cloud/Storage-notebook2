@@ -1486,6 +1486,10 @@ ${categoryOptions}
 
   const handleFormSave = (e: React.FormEvent, forceAsNewInstance = false) => {
     e.preventDefault();
+    if (isUploading) {
+      showToast('圖片仍在上傳，請稍候完成後再儲存');
+      return;
+    }
     if (!formName.trim()) {
       showToast('請輸入產品名稱！');
       return;
@@ -1638,7 +1642,10 @@ ${categoryOptions}
           updatedProducts[matchIndex] = {
             ...matchProd,
             instances: [...matchProd.instances, ...newInstances],
-            photo: formPhoto || matchProd.photo
+            photo: formPhoto || matchProd.photo,
+            photoThumbnail: formPhoto
+              ? (formPhotoThumbnail || matchProd.photoThumbnail)
+              : matchProd.photoThumbnail
           };
           targetProdId = matchProd.id;
         } else {
@@ -1649,6 +1656,7 @@ ${categoryOptions}
             brand: formBrand.trim(),
             name: formName.trim(),
             photo: formPhoto || undefined,
+            photoThumbnail: formPhotoThumbnail || undefined,
             status: 'active',
             threshold: Number(formThreshold) || 0,
             instances: newInstances
@@ -1699,6 +1707,7 @@ ${categoryOptions}
         };
         if (formPhoto) {
           updated[existingProductIndex].photo = formPhoto;
+          updated[existingProductIndex].photoThumbnail = formPhotoThumbnail || updated[existingProductIndex].photoThumbnail;
         }
         setProducts(updated);
         // Expand this product to show the new instance
@@ -1717,6 +1726,7 @@ ${categoryOptions}
           brand: formBrand.trim(),
           name: formName.trim(),
           photo: formPhoto || undefined,
+          photoThumbnail: formPhotoThumbnail || undefined,
           status: 'active',
           threshold: Number(formThreshold) || 0,
           instances: newInstances
@@ -2808,9 +2818,18 @@ ${categoryOptions}
               <div className="space-y-2 pt-2">
                 <button 
                   type="submit"
-                  className="w-full py-3 bg-retro-secondary text-retro-card font-bold text-sm rounded-xl hover:brightness-105 active:scale-[0.99] transition-all shadow cursor-pointer"
+                  disabled={isUploading}
+                  className="w-full py-3 bg-retro-secondary text-retro-card font-bold text-sm rounded-xl hover:brightness-105 active:scale-[0.99] transition-all shadow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isEditingMaster ? '儲存大品項修改' : editingInstanceId ? '儲存修改' : isAddingInstanceToExisting ? '新增規格明細' : '確認無誤，新增至資料庫'}
+                  {isUploading
+                    ? '圖片上傳中，請稍候…'
+                    : isEditingMaster
+                      ? '儲存大品項修改'
+                      : editingInstanceId
+                        ? '儲存修改'
+                        : isAddingInstanceToExisting
+                          ? '新增規格明細'
+                          : '確認無誤，新增至資料庫'}
                 </button>
 
                 {editingInstanceId && (
