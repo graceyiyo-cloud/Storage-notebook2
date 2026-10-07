@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDocFromServer, setDoc, deleteDoc, getDocs, getDocsFromServer, collection, deleteField, updateDoc, query } from 'firebase/firestore';
 import { auth, db, storage, signInWithGoogle, logOut } from './firebase';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { 
   Sparkles, 
   Droplets, 
@@ -217,6 +217,50 @@ function CategoryIcon({ name, className = "w-5 h-5" }: { name: string; className
 
 const APP_VERSION = "2.0v";
 
+const getOwnedProductPhotoPath = (photoUrl: string, userId: string) => {
+  try {
+    const url = new URL(photoUrl);
+    if (url.hostname !== 'firebasestorage.googleapis.com') return null;
+    const objectMarker = '/o/';
+    const markerIndex = url.pathname.indexOf(objectMarker);
+    if (markerIndex < 0) return null;
+    const objectPath = decodeURIComponent(url.pathname.slice(markerIndex + objectMarker.length));
+    const ownedPrefix = `users/${userId}/products/`;
+    return objectPath.startsWith(ownedPrefix) ? objectPath : null;
+  } catch {
+    return null;
+  }
+};
+
+const deleteUnreferencedProductPhotos = async (
+  userId: string,
+  candidateUrls: string[],
+  remainingProducts: Product[]
+) => {
+  const referencedUrls = new Set(remainingProducts.map(product => product.photo).filter(Boolean));
+  const failedUrls: string[] = [];
+  const unusedUrls = Array.from(new Set(candidateUrls)).filter(url => !referencedUrls.has(url));
+
+  await Promise.all(unusedUrls.map(async (photoUrl) => {
+    const objectPath = getOwnedProductPhotoPath(photoUrl, userId);
+    if (!objectPath) return;
+    try {
+      await deleteObject(ref(storage, objectPath));
+      if ('caches' in window) {
+        const cache = await caches.open(`cosmetics-thumbnails-v1-${userId}`);
+        await cache.delete(photoUrl);
+      }
+    } catch (error: any) {
+      if (error?.code !== 'storage/object-not-found') {
+        failedUrls.push(photoUrl);
+        console.warn('[storage] Unable to delete unused product photo', error);
+      }
+    }
+  }));
+
+  return failedUrls;
+};
+
 function MainApp({ user }: { user: User; key?: React.Key }) {
   const initialCacheRef = useRef<CachedUserData | null>(readUserCache(user.uid));
   const initialCache = initialCacheRef.current;
@@ -236,6 +280,8 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     products: initialCache.products
   }) : '');
   const hasLocalEditsRef = useRef(false);
+  const pendingPhotoCleanupRef = useRef<Set<string>>(new Set());
+  const pendingFormUploadRef = useRef<string | null>(null);
 
   // Load user data from Firestore on mount
   useEffect(() => {
@@ -400,6 +446,15 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
         setSyncState('current');
         writeUserCache(user.uid, { categories, capacityUnits, products, syncedAt });
 
+        if (pendingPhotoCleanupRef.current.size > 0) {
+          const failedUrls = await deleteUnreferencedProductPhotos(
+            user.uid,
+            Array.from(pendingPhotoCleanupRef.current),
+            products
+          );
+          pendingPhotoCleanupRef.current = new Set(failedUrls);
+        }
+
       } catch (err: any) {
         console.error('Error saving data', err);
         showToast(`儲存失敗: ${err.message || String(err)}`);
@@ -511,6 +566,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [formFinishedDate, setFormFinishedDate] = useState(''); // 用完或丟棄的日期
   const [formPhoto, setFormPhoto] = useState<string>(''); // Base64 string
   const [formPhotoThumbnail, setFormPhotoThumbnail] = useState<string>(''); // Thumbnail base64
+  const [isFormPhotoRemoved, setIsFormPhotoRemoved] = useState(false);
   const [formPurchaseDate, setFormPurchaseDate] = useState('');
   const [formPurchasePlace, setFormPurchasePlace] = useState('');
   const [formPrice, setFormPrice] = useState('');
@@ -783,6 +839,24 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     }, 3000);
   };
 
+  const queueProductPhotoCleanup = (...photoUrls: Array<string | undefined>) => {
+    photoUrls.forEach(photoUrl => {
+      if (photoUrl) pendingPhotoCleanupRef.current.add(photoUrl);
+    });
+  };
+
+  const discardPendingFormUpload = () => {
+    const photoUrl = pendingFormUploadRef.current;
+    pendingFormUploadRef.current = null;
+    if (photoUrl) {
+      void deleteUnreferencedProductPhotos(user.uid, [photoUrl], products);
+    }
+  };
+
+  useEffect(() => {
+    if (!showAddForm) discardPendingFormUpload();
+  }, [showAddForm]);
+
   // --- File uploads & Photo Handling ---
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, isFormPhoto: boolean) => {
     const file = e.target.files?.[0];
@@ -888,8 +962,14 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
                 cacheControl: 'public,max-age=31536000,immutable'
               });
               const downloadURL = await getDownloadURL(storageRef);
+              const previousPendingUrl = pendingFormUploadRef.current;
+              if (previousPendingUrl && previousPendingUrl !== downloadURL) {
+                void deleteUnreferencedProductPhotos(user.uid, [previousPendingUrl], products);
+              }
+              pendingFormUploadRef.current = downloadURL;
               setFormPhoto(downloadURL);
               setFormPhotoThumbnail(thumbBase64);
+              setIsFormPhotoRemoved(false);
               showToast('圖片上傳成功');
             } catch (error: any) {
               console.error('Upload error:', error);
@@ -1368,6 +1448,7 @@ ${categoryOptions}
   };
 
   const clearForm = () => {
+    discardPendingFormUpload();
     setFormBrand('');
     setFormName('');
     setFormCategory(currentTab !== 'settings' && currentTab !== 'history' ? currentTab : categories[0]?.id || 'makeup');
@@ -1383,6 +1464,7 @@ ${categoryOptions}
     setFormFinishedDate('');
     setFormPhoto('');
     setFormPhotoThumbnail('');
+    setIsFormPhotoRemoved(false);
     setFormPurchaseDate(new Date().toISOString().split('T')[0]);
     setFormPurchasePlace('');
     setFormPrice('');
@@ -1443,6 +1525,8 @@ ${categoryOptions}
 
     // A. Edit Master Product Info ONLY (Requirement: Button 3 - editing master info of the product group)
     if (isEditingMaster && editingProductId) {
+      const previousPhoto = products.find(prod => prod.id === editingProductId)?.photo;
+      const nextPhoto = isFormPhotoRemoved ? undefined : (formPhoto || previousPhoto);
       const updatedProducts = products.map(prod => {
         if (prod.id === editingProductId) {
           return {
@@ -1451,14 +1535,18 @@ ${categoryOptions}
             subcategory: subcatValue,
             brand: formBrand.trim(),
             name: formName.trim(),
-            photo: formPhoto || prod.photo,
-            photoThumbnail: formPhotoThumbnail || prod.photoThumbnail,
+            photo: nextPhoto,
+            photoThumbnail: isFormPhotoRemoved ? undefined : (formPhotoThumbnail || prod.photoThumbnail),
             threshold: Number(formThreshold) || 0
           };
         }
         return prod;
       });
       setProducts(updatedProducts);
+      if (previousPhoto && previousPhoto !== nextPhoto) {
+        queueProductPhotoCleanup(previousPhoto);
+      }
+      pendingFormUploadRef.current = null;
       showToast('產品大品項資料修改成功！');
       setShowAddForm(false);
       clearForm();
@@ -1645,6 +1733,7 @@ ${categoryOptions}
     }
 
     setShowAddForm(false);
+    pendingFormUploadRef.current = null;
     clearForm();
     setCurrentTab(formCategory); // Redirect to corresponding category tab
   };
@@ -1739,6 +1828,7 @@ ${categoryOptions}
     setFormSubcategory(prod.subcategory);
     setFormPhoto(prod.photo || '');
     setFormPhotoThumbnail(prod.photoThumbnail || '');
+    setIsFormPhotoRemoved(false);
     // Reset instance specific states to default
     setFormQty(1);
     setFormCapacity('');
@@ -1801,6 +1891,7 @@ ${categoryOptions}
         }
         
         setProducts(updatedProducts);
+        queueProductPhotoCleanup(archivedProduct.photo);
         showToast('已成功還原紀錄！');
       }
     );
@@ -1880,6 +1971,10 @@ ${categoryOptions}
           }).filter(p => p.instances.length > 0);
 
           setProducts(nextProducts);
+          const removedProduct = products.find(product => product.id === editingProductId);
+          if (removedProduct && !nextProducts.some(product => product.id === editingProductId)) {
+            queueProductPhotoCleanup(removedProduct.photo);
+          }
           setShowAddForm(false);
           clearForm();
           showToast('明細已成功永久刪除！');
@@ -1914,6 +2009,10 @@ ${categoryOptions}
         }).filter(p => p.instances.length > 0);
 
         setProducts(nextProducts);
+        const removedProduct = products.find(product => product.id === prodId);
+        if (removedProduct && !nextProducts.some(product => product.id === prodId)) {
+          queueProductPhotoCleanup(removedProduct.photo);
+        }
         showToast('規格明細已成功永久刪除！');
 
         // If detail modal is open, sync or close
@@ -2356,7 +2455,12 @@ ${categoryOptions}
                           />
                           <button 
                             type="button"
-                            onClick={() => setFormPhoto('')}
+                            onClick={() => {
+                              setFormPhoto('');
+                              setFormPhotoThumbnail('');
+                              setIsFormPhotoRemoved(true);
+                              discardPendingFormUpload();
+                            }}
                             className="text-xs text-red-500 font-bold hover:underline"
                           >
                             移除
@@ -2738,7 +2842,10 @@ ${categoryOptions}
                           '刪除大品項',
                           '確定要永久刪除此大品項及其所有購買明細嗎？此操作無法復原。',
                           () => {
-                            setProducts(products.filter(p => p.id !== editingProductId));
+                            const removedProduct = products.find(product => product.id === editingProductId);
+                            const remainingProducts = products.filter(product => product.id !== editingProductId);
+                            setProducts(remainingProducts);
+                            queueProductPhotoCleanup(removedProduct?.photo);
                             setShowAddForm(false);
                             setSelectedDetailProduct(null);
                             clearForm();
@@ -3324,7 +3431,9 @@ ${categoryOptions}
                                   '永久刪除紀錄',
                                   `確定要從歷史封存中永久刪除「${product.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
                                   () => {
-                                    setProducts(products.filter(p => p.id !== product.id));
+                                    const remainingProducts = products.filter(item => item.id !== product.id);
+                                    setProducts(remainingProducts);
+                                    queueProductPhotoCleanup(product.photo);
                                     showToast('已永久刪除該紀錄');
                                   }
                                 );
@@ -3639,7 +3748,9 @@ ${categoryOptions}
                       '永久刪除紀錄',
                       `確定要從歷史封存中永久刪除「${selectedDetailProduct.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
                       () => {
-                        setProducts(products.filter(p => p.id !== selectedDetailProduct.id));
+                        const remainingProducts = products.filter(product => product.id !== selectedDetailProduct.id);
+                        setProducts(remainingProducts);
+                        queueProductPhotoCleanup(selectedDetailProduct.photo);
                         setSelectedDetailProduct(null);
                         showToast('已永久刪除該紀錄');
                       }
