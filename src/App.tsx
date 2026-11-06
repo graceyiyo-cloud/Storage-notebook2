@@ -1,41 +1,41 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDocFromServer, setDoc, deleteDoc, getDocs, getDocsFromServer, collection, deleteField, updateDoc, query } from 'firebase/firestore';
 import { auth, db, storage, signInWithGoogle, logOut } from './firebase';
 import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
-import { 
-  Sparkles, 
-  Droplets, 
-  Pill, 
-  Settings, 
-  Camera, 
-  Plus, 
-  Search, 
-  Package, 
-  Droplet, 
-  Edit3, 
-  Archive, 
-  Trash2, 
-  GripVertical, 
-  ListTree, 
-  ChevronDown, 
-  ChevronUp, 
-  Check, 
-  Eye, 
-  EyeOff, 
-  AlertTriangle, 
-  X, 
-  Info, 
-  Calendar,
+import {
+  Sparkles,
+  Droplets,
+  Pill,
+  Settings,
+  Camera,
+  Plus,
+  Search,
+  Package,
+  Pencil,
+  Archive,
+  Trash2,
+  GripVertical,
+  ListTree,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  X,
+  CircleAlert,
   Heart,
   Star,
   ShoppingBag,
-  ShoppingCart,
-  ChevronRight, PackageOpen, Copy,
-  History,
-  Type,
+  PackageOpen,
   ImageIcon,
-  ArrowLeft,
+  Ruler,
+  DatabaseBackup,
+  Download,
+  Upload,
+  RotateCcw,
+  LogOut,
+  RefreshCw,
   LucideIcon
 } from 'lucide-react';
 import { Category, Product, ProductInstance } from './types';
@@ -215,7 +215,66 @@ function CategoryIcon({ name, className = "w-5 h-5" }: { name: string; className
   return <IconComponent className={className} />;
 }
 
-const APP_VERSION = "2.0v";
+const CATEGORY_ICON_OPTIONS = ['sparkles', 'droplets', 'pill', 'package', 'shopping-bag', 'heart', 'star'];
+const CATEGORY_ICON_LABELS: Record<string, string> = {
+  sparkles: '閃亮',
+  droplets: '水滴',
+  pill: '膠囊',
+  package: '盒子',
+  'shopping-bag': '購物袋',
+  heart: '愛心',
+  star: '星星'
+};
+
+const APP_VERSION = "2.1v";
+
+// Local calendar date (YYYY-MM-DD). toISOString() would give yesterday's date
+// before 08:00 in Taiwan because it is UTC-based.
+const todayStr = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+// Split a stored capacity such as "30ml" or "8片" into amount and unit.
+const splitCapacity = (capacity: string, units: string[]) => {
+  const value = (capacity || '').trim();
+  const unit = [...units].sort((a, b) => b.length - a.length).find(u => u && value.endsWith(u));
+  if (!unit) return { amount: value, unit: '' };
+  return { amount: value.slice(0, -unit.length).trim(), unit };
+};
+
+const isActiveUsage = (usage: ProductInstance['usage']) => usage === '未開封' || usage === '使用中';
+
+// Earliest upcoming deadline of one item: printed expiry or, once opened, the PAO limit.
+const getInstanceDeadline = (inst: ProductInstance) => {
+  let days = 9999;
+  let date = '';
+  if (inst.expiry) {
+    days = calculateDaysToExpiry(inst.expiry);
+    date = inst.expiry;
+  }
+  if (inst.usage === '使用中' && inst.paoMonths && inst.openedDate) {
+    const pao = calculatePaoExpiry(inst.openedDate, inst.paoMonths);
+    if (pao && pao.daysLeft < days) {
+      days = pao.daysLeft;
+      date = pao.expiryDate;
+    }
+  }
+  return { days, date };
+};
+
+const formatDuration = (fromDate?: string, toDate?: string) => {
+  if (!fromDate) return '';
+  const start = new Date(fromDate);
+  const end = toDate ? new Date(toDate) : new Date();
+  const diffMs = end.getTime() - start.getTime();
+  if (isNaN(diffMs) || diffMs < 0) return '';
+  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const years = Math.floor(totalDays / 365);
+  const months = Math.floor((totalDays % 365) / 30);
+  if (years === 0 && months === 0) return `${totalDays} 天`;
+  return `${years > 0 ? `${years} 年` : ''}${months > 0 ? `${months} 個月` : ''}`;
+};
 
 const getOwnedProductPhotoPath = (photoUrl: string, userId: string) => {
   try {
@@ -465,74 +524,6 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     return () => window.clearTimeout(timeout);
   }, [categories, products, capacityUnits, isDataLoaded, user.uid, refreshToken]);
 
-  const [apiKeys, setApiKeys] = useState<string[]>(() => {
-    let keys = ['', '', ''];
-    try {
-      const stored = localStorage.getItem(`cosmetics_gemini_api_keys_${user.uid}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-           keys = [...parsed, '', '', ''].slice(0, 3);
-        }
-      } else {
-        const oldKey = localStorage.getItem('cosmetics_gemini_api_key');
-        if (oldKey) {
-           keys[0] = oldKey;
-        }
-      }
-    } catch(e) {}
-    return keys;
-  });
-  
-  const apiKeyIndexRef = useRef(0);
-  const getGeminiApiKey = () => {
-    const validKeys = apiKeys.filter(k => k.trim().length > 0);
-    if (validKeys.length === 0) return null;
-    const key = validKeys[apiKeyIndexRef.current % validKeys.length];
-    apiKeyIndexRef.current += 1;
-    return key;
-  };
-
-  const [appTheme, setAppTheme] = useState<'retro' | 'pixel' | 'minimal'>(() => {
-    return (localStorage.getItem('cosmetics_theme') as 'retro' | 'pixel' | 'minimal') || 'retro';
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (appTheme === 'pixel') {
-      root.setAttribute('data-theme', 'pixel');
-    } else if (appTheme === 'minimal') {
-      root.setAttribute('data-theme', 'minimal');
-    } else {
-      root.removeAttribute('data-theme');
-    }
-  }, [appTheme]);
-
-  const handleThemeChange = (theme: 'retro' | 'pixel' | 'minimal') => {
-    setAppTheme(theme);
-    localStorage.setItem('cosmetics_theme', theme);
-  };
-
-  const [appFontSize, setAppFontSize] = useState<'small' | 'medium' | 'large'>(() => {
-    return (localStorage.getItem('cosmetics_font_size') as 'small' | 'medium' | 'large') || 'small';
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (appFontSize === 'small') {
-      root.style.fontSize = '16px';
-    } else if (appFontSize === 'medium') {
-      root.style.fontSize = '18px';
-    } else if (appFontSize === 'large') {
-      root.style.fontSize = '20px';
-    }
-  }, [appFontSize]);
-
-  const handleFontSizeChange = (size: 'small' | 'medium' | 'large') => {
-    setAppFontSize(size);
-    localStorage.setItem('cosmetics_font_size', size);
-  };
-
   const [currentTab, setCurrentTab] = useState<string>(() => {
     return categories[0]?.id || 'makeup';
   });
@@ -540,15 +531,9 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedSearchSubcategory, setSelectedSearchSubcategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set(['prod_1']));
-
-  // --- Gemini API Loading States ---
-  const [diagnosticLog, setDiagnosticLog] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [toast, setToast] = useState<{ message: string; undo?: () => void } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isSearchingAi, setIsSearchingAi] = useState(false);
-  const [aiStatusText, setAiStatusText] = useState('正在處理圖片...');
 
   // --- Form Input States ---
   const [formBrand, setFormBrand] = useState('');
@@ -559,7 +544,6 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [formCapacity, setFormCapacity] = useState('');
   const [formCapacityUnit, setFormCapacityUnit] = useState('ml');
   const [formUsage, setFormUsage] = useState<'使用中' | '未開封' | '已用完' | '已丟棄'>('未開封');
-  const [formThreshold, setFormThreshold] = useState<number | string>(0);
   const [formExpiry, setFormExpiry] = useState('');
   const [formPaoMonths, setFormPaoMonths] = useState<string>(''); // PAO 可使用月數
   const [formOpenedDate, setFormOpenedDate] = useState(''); // 開封日期
@@ -570,26 +554,33 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [formPurchaseDate, setFormPurchaseDate] = useState('');
   const [formPurchasePlace, setFormPurchasePlace] = useState('');
   const [formPrice, setFormPrice] = useState('');
+  const [showMoreFields, setShowMoreFields] = useState(false);
 
-  // Product Master Detail View State
-  const [selectedDetailProduct, setSelectedDetailProduct] = useState<Product | null>(null);
-  const [detailActiveTab, setDetailActiveTab] = useState<'status' | 'purchase' | 'usage'>('status');
+  // Product detail view: keep only the id so the view always reflects the latest data.
+  const [detailProductId, setDetailProductId] = useState<string | null>(null);
+  const selectedDetailProduct = detailProductId ? products.find(p => p.id === detailProductId) || null : null;
+  const setSelectedDetailProduct = (product: Product | null) => setDetailProductId(product ? product.id : null);
+  const [detailActiveTab, setDetailActiveTab] = useState<'items' | 'records'>('items');
 
   // Custom Confirmation Dialog State
-  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; confirmLabel?: string; danger?: boolean } | null>(null);
 
   // Fullscreen Image Modal State
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
   // Cropper States
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
-  const [isCroppingFormPhoto, setIsCroppingFormPhoto] = useState(false);
   const [crop, setCrop] = useState<Crop>();
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<PixelCrop | null>(null);
   const [imageRef, setImageRef] = useState<HTMLImageElement | null>(null);
 
-  const askConfirmation = (title: string, message: string, onConfirm: () => void) => {
-    setConfirmDialog({ title, message, onConfirm });
+  const askConfirmation = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    options: { confirmLabel?: string; danger?: boolean } = {}
+  ) => {
+    setConfirmDialog({ title, message, onConfirm, ...options });
   };
 
   // Editing state
@@ -599,7 +590,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [isAddingInstanceToExisting, setIsAddingInstanceToExisting] = useState(false);
 
   // --- Setting View States ---
-  const [settingsView, setSettingsView] = useState<'menu' | 'apikey' | 'category' | 'history' | 'appearance' | 'backup' | 'units'>('menu');
+  const [settingsView, setSettingsView] = useState<'menu' | 'category' | 'history' | 'backup' | 'units'>('menu');
   const [newCatName, setNewCatName] = useState('');
   const [showNewUnitInput, setShowNewUnitInput] = useState(false);
   const [newUnitName, setNewUnitName] = useState('');
@@ -610,18 +601,11 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [editingSubCatId, setEditingSubCatId] = useState<string | null>(null);
   const [editingSubIdx, setEditingSubIdx] = useState<number | null>(null);
   const [editingSubName, setEditingSubName] = useState('');
-  const [apiKeyInputs, setApiKeyInputs] = useState<string[]>(apiKeys);
-  const [showApiKey, setShowApiKey] = useState(false);
-
-  const handleSaveApiKey = () => {
-    localStorage.setItem(`cosmetics_gemini_api_keys_${user.uid}`, JSON.stringify(apiKeyInputs));
-    setApiKeys(apiKeyInputs);
-    showToast('Gemini API 金鑰儲存成功！');
-  };
 
   // --- Notification Center States ---
-  const [expiredPaoItems, setExpiredPaoItems] = useState<any[]>([]);
+  const expiredPaoItems = useMemo(() => checkAllOpenedExpiredProducts(products), [products]);
   const [showNotificationBanner, setShowNotificationBanner] = useState(true);
+  const [isExpiredListOpen, setIsExpiredListOpen] = useState(false);
 
   // --- Drag & Drop Reordering States ---
   const [draggedCatIdx, setDraggedCatIdx] = useState<number | null>(null);
@@ -629,145 +613,87 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const [draggedSubCatId, setDraggedSubCatId] = useState<string | null>(null);
 
   // Refs
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const galleryInputRef = useRef<HTMLInputElement>(null);
   const formPhotoInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
-  
-  
-  // --- Hardware Back Button Handling ---
-  const expectedHash = confirmDialog ? '#confirm' 
-    : cropImageSrc ? '#crop' 
-    : fullscreenImage ? '#image' 
-    : showAddForm ? '#add'
-    : selectedDetailProduct ? '#detail'
-    : (currentTab !== 'settings' && (searchKeyword.trim() || selectedSearchSubcategory)) ? '#filter'
-    : (currentTab === 'settings' && settingsView === 'category') ? '#settings-category'
-    : (currentTab === 'settings' && settingsView === 'units') ? '#settings-units'
-    : (currentTab === 'settings' && settingsView === 'history') ? '#settings-history'
-    : (currentTab === 'settings' && settingsView === 'apikey') ? '#settings-apikey'
-    : (currentTab === 'settings' && settingsView === 'appearance') ? '#settings-appearance'
-    : (currentTab === 'settings' && settingsView === 'backup') ? '#settings-backup'
-    : '';
+  // --- Android / browser Back button ---
+  // Every open layer owns exactly one history entry, so Back closes only the
+  // top-most layer: dialog → photo → form → product detail → settings page /
+  // search filter → back to the first category tab. On the first tab with
+  // nothing open, Back is left to the platform.
+  const homeTab = categories[0]?.id || '';
+  const layers: string[] = [];
+  if (isDataLoaded && homeTab && currentTab !== homeTab) layers.push('tab');
+  if (currentTab !== 'settings' && (searchKeyword.trim() || selectedSearchSubcategory)) layers.push('filter');
+  if (currentTab === 'settings' && settingsView !== 'menu') layers.push('settings');
+  if (selectedDetailProduct) layers.push('detail');
+  if (showAddForm) layers.push('form');
+  if (fullscreenImage) layers.push('image');
+  if (cropImageSrc) layers.push('crop');
+  if (confirmDialog) layers.push('confirm');
+  const layersKey = layers.join('/');
 
-  const getHashDepth = (hash: string) => {
-    if (hash === '#confirm') return 5;
-    if (hash === '#crop' || hash === '#image') return 4;
-    if (hash === '#add' || hash === '#detail') return 3;
-    if (hash === '#filter' || hash.startsWith('#settings-')) return 2;
-    return 1;
+  const historyDepthRef = useRef(0);
+  const pendingHistoryBackRef = useRef(false);
+  const closeTopLayerRef = useRef<() => void>(() => {});
+  const syncHistoryRef = useRef<() => void>(() => {});
+
+  closeTopLayerRef.current = () => {
+    switch (layers[layers.length - 1]) {
+      case 'confirm': setConfirmDialog(null); break;
+      case 'crop': handleCropCancel(); break;
+      case 'image': setFullscreenImage(null); break;
+      case 'form': setShowAddForm(false); clearForm(); break;
+      case 'detail': setSelectedDetailProduct(null); break;
+      case 'settings': setSettingsView('menu'); break;
+      case 'filter': setSearchKeyword(''); setSelectedSearchSubcategory(''); break;
+      case 'tab': handleTabChange(homeTab); break;
+    }
+  };
+
+  syncHistoryRef.current = () => {
+    if (pendingHistoryBackRef.current) return; // wait until the previous back() lands
+    const target = layers.length;
+    const depth = historyDepthRef.current;
+    if (target > depth) {
+      for (let i = depth; i < target; i++) {
+        window.history.pushState({ storageLayer: i + 1 }, '', `#${layers[i]}`);
+      }
+      historyDepthRef.current = target;
+    } else if (target < depth) {
+      // Closed in the UI (button, save, swipe): drop the matching history entries.
+      pendingHistoryBackRef.current = true;
+      historyDepthRef.current = target;
+      window.history.go(target - depth);
+    } else if (target > 0 && window.location.hash !== `#${layers[target - 1]}`) {
+      // Same depth, different screen (e.g. the form closed and the product opened).
+      window.history.replaceState(window.history.state, '', `#${layers[target - 1]}`);
+    }
   };
 
   useEffect(() => {
-    const syncUrlToState = () => {
-      const currentHash = window.location.hash;
-      if (currentHash !== expectedHash) {
-        const expectedDepth = getHashDepth(expectedHash);
-        const currentDepth = getHashDepth(currentHash);
-        
-        if (expectedDepth > currentDepth) {
-          window.history.pushState(null, '', expectedHash);
-        } else if (expectedDepth < currentDepth) {
-          // Unwind the stack until it matches
-          window.history.back();
-        } else {
-          window.history.replaceState(null, '', expectedHash);
-        }
-      }
-    };
-    
-    // Run initially and whenever expectedHash changes
-    syncUrlToState();
-    
-    // Also run when hash changes (e.g. from a back() call unwinding the stack)
-    window.addEventListener('hashchange', syncUrlToState);
-    return () => window.removeEventListener('hashchange', syncUrlToState);
-  }, [expectedHash]);
-
-  useEffect(() => {
+    // After a reload the old #hash no longer matches any open screen: start clean.
+    if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
     const handlePopState = () => {
-      const hash = window.location.hash;
-      
-      if (hash === '' || hash === '#') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        setSearchKeyword('');
-        setSelectedSearchSubcategory('');
-        if (settingsView !== 'menu') setSettingsView('menu');
-      } else if (hash === '#filter') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-      } else if (hash === '#settings-category') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'category') setSettingsView('category');
-      } else if (hash === '#settings-history') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'history') setSettingsView('history');
-      } else if (hash === '#settings-apikey') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'apikey') setSettingsView('apikey');
-      } else if (hash === '#settings-appearance') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'appearance') setSettingsView('appearance');
-      } else if (hash === '#settings-backup') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'backup') setSettingsView('backup');
-      } else if (hash === '#settings-units') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
-        setSelectedDetailProduct(null);
-        if (settingsView !== 'units') setSettingsView('units');
-      } else if (hash === '#add') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setSelectedDetailProduct(null);
-      } else if (hash === '#detail') {
-        setConfirmDialog(null);
-        setCropImageSrc(null);
-        setFullscreenImage(null);
-        setShowAddForm(false);
+      if (pendingHistoryBackRef.current) {
+        pendingHistoryBackRef.current = false;
+        syncHistoryRef.current();
+        return;
       }
+      historyDepthRef.current = Math.max(0, historyDepthRef.current - 1);
+      closeTopLayerRef.current();
     };
-
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [settingsView]);
+  }, []);
+
+  useEffect(() => {
+    syncHistoryRef.current();
+  }, [layersKey]);
 
   // --- Side Effects & Persistence ---
-  useEffect(() => {
-    // Re-evaluate expired PAO products whenever products change
-    const expired = checkAllOpenedExpiredProducts(products);
-    setExpiredPaoItems(expired);
-  }, [products]);
 
   // Once the current screen is interactive, warm the first four images in each
   // category one-by-one. The service worker persists these responses, so tab
@@ -799,16 +725,10 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     };
   }, [isDataLoaded, user.uid]);
 
-  useEffect(() => {
-    // Initial scan for expired items
-    const expired = checkAllOpenedExpiredProducts(products);
-    setExpiredPaoItems(expired);
-  }, []);
-
   // Sync tab with updated categories if current tab's category was deleted
   useEffect(() => {
     if (!isDataLoaded) return;
-    if (currentTab !== 'settings' && currentTab !== 'history' && !categories.some(c => c.id === currentTab)) {
+    if (currentTab !== 'settings' && !categories.some(c => c.id === currentTab)) {
       if (categories.length > 0) {
         setCurrentTab(categories[0].id);
       } else {
@@ -817,6 +737,14 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
     }
   }, [categories, currentTab, isDataLoaded]);
 
+  // Without a local cache the first tab is only known once the cloud data arrives.
+  const hasSetInitialTabRef = useRef(Boolean(initialCache));
+  useEffect(() => {
+    if (!isDataLoaded || hasSetInitialTabRef.current || categories.length === 0) return;
+    hasSetInitialTabRef.current = true;
+    setCurrentTab(categories[0].id);
+  }, [isDataLoaded, categories]);
+
   useEffect(() => {
     setSelectedSearchSubcategory('');
   }, [currentTab]);
@@ -824,19 +752,30 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   // Handle Usage status switch - auto fill open date if usage is '使用中' and it is blank
   useEffect(() => {
     if (formUsage === '使用中' && !formOpenedDate) {
-      setFormOpenedDate(new Date().toISOString().split('T')[0]);
+      setFormOpenedDate(todayStr());
     }
     if ((formUsage === '已用完' || formUsage === '已丟棄') && !formFinishedDate) {
-      setFormFinishedDate(new Date().toISOString().split('T')[0]);
+      setFormFinishedDate(todayStr());
     }
   }, [formUsage]);
 
   // --- Toast Manager ---
-  const showToast = (msg: string | null) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
+  const showToast = (msg: string | null, undo?: () => void) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast(msg ? { message: msg, undo } : null);
+    if (msg) {
+      toastTimerRef.current = window.setTimeout(() => setToast(null), undo ? 5000 : 2600);
+    }
+  };
+
+  // Snapshot-based undo for quick actions (open / used up / move to history).
+  const commitWithUndo = (nextProducts: Product[], message: string) => {
+    const previousProducts = products;
+    setProducts(nextProducts);
+    showToast(message, () => {
+      setProducts(previousProducts);
+      showToast('已復原');
+    });
   };
 
   const queueProductPhotoCleanup = (...photoUrls: Array<string | undefined>) => {
@@ -858,15 +797,13 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   }, [showAddForm]);
 
   // --- File uploads & Photo Handling ---
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, isFormPhoto: boolean) => {
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // Reset input to allow selecting the same file again
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const result = reader.result as string;
-        setCropImageSrc(result);
-        setIsCroppingFormPhoto(isFormPhoto);
+        setCropImageSrc(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -875,7 +812,7 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
   const onCropComplete = (crop: PixelCrop) => {
     setCroppedAreaPixels(crop);
   };
-  
+
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     setImageRef(e.currentTarget);
     const { width, height } = e.currentTarget;
@@ -886,6 +823,9 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
       width: 80,
       height: 80
     });
+    // The crop library only reports pixels after a drag, so seed the default
+    // area here; otherwise confirming without touching the frame did nothing.
+    setCroppedAreaPixels({ unit: 'px', x: width * 0.1, y: height * 0.1, width: width * 0.8, height: height * 0.8 });
   };
 
   const handleCropConfirm = async () => {
@@ -946,307 +886,48 @@ function MainApp({ user }: { user: User; key?: React.Key }) {
         tCtx?.drawImage(img, 0, 0, tWidth, tHeight);
         const thumbBase64 = thumbCanvas.toDataURL('image/webp', 0.5);
 
-        if (isCroppingFormPhoto) {
-          // Upload to Firebase Storage
-          const uploadToStorage = async () => {
-            if (!user) {
-              showToast('請先登入');
-              return;
+        // Upload to Firebase Storage
+        const uploadToStorage = async () => {
+          if (!user) {
+            showToast('請先登入');
+            return;
+          }
+          setIsUploading(true);
+          try {
+            const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.webp`);
+            await uploadString(storageRef, compressedBase64, 'data_url', {
+              contentType: 'image/webp',
+              cacheControl: 'public,max-age=31536000,immutable'
+            });
+            const downloadURL = await getDownloadURL(storageRef);
+            const previousPendingUrl = pendingFormUploadRef.current;
+            if (previousPendingUrl && previousPendingUrl !== downloadURL) {
+              void deleteUnreferencedProductPhotos(user.uid, [previousPendingUrl], products);
             }
-            setIsUploading(true);
-            showToast('上傳圖片中...');
-            try {
-              const storageRef = ref(storage, `users/${user.uid}/products/${Date.now()}.webp`);
-              await uploadString(storageRef, compressedBase64, 'data_url', {
-                contentType: 'image/webp',
-                cacheControl: 'public,max-age=31536000,immutable'
-              });
-              const downloadURL = await getDownloadURL(storageRef);
-              const previousPendingUrl = pendingFormUploadRef.current;
-              if (previousPendingUrl && previousPendingUrl !== downloadURL) {
-                void deleteUnreferencedProductPhotos(user.uid, [previousPendingUrl], products);
-              }
-              pendingFormUploadRef.current = downloadURL;
-              setFormPhoto(downloadURL);
-              setFormPhotoThumbnail(thumbBase64);
-              setIsFormPhotoRemoved(false);
-              showToast('圖片上傳成功');
-            } catch (error: any) {
-              console.error('Upload error:', error);
-              showToast(`圖片上傳失敗: ${error.message}`);
-            } finally {
-              setIsUploading(false);
-            }
-          };
-          uploadToStorage();
-        } else {
-          // Camera scan trigger
-          triggerAiScan(compressedBase64, 'image/webp');
-        }
+            pendingFormUploadRef.current = downloadURL;
+            setFormPhoto(downloadURL);
+            setFormPhotoThumbnail(thumbBase64);
+            setIsFormPhotoRemoved(false);
+          } catch (error: any) {
+            console.error('Upload error:', error);
+            showToast(`照片上傳失敗：${error.message}`);
+          } finally {
+            setIsUploading(false);
+          }
+        };
+        uploadToStorage();
       };
       img.src = croppedBase64;
     } catch (e) {
       console.error(e);
-      showToast('圖片裁切失敗');
+      showToast('照片裁切失敗');
     }
   };
 
   const handleCropCancel = () => {
     setCropImageSrc(null);
     setCroppedAreaPixels(null);
-  };
-
-  // --- API Call: Gemini Web Search & Image Recognition ---
-  const triggerAiScan = async (base64Data: string, mimeType: string) => {
-    const activeApiKey = getGeminiApiKey();
-    if (!activeApiKey) {
-      showToast('尚未設定 API Key，請在設定頁面輸入金鑰！');
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setAiStatusText('正在上傳並解析圖片...');
-
-    // Build category options string
-    const categoryOptions = categories.map(c => 
-      `- ${c.name} (id: ${c.id}), 子分類: ${c.subcategories.join(', ')}`
-    ).join('\n');
-
-    try {
-      const base64String = base64Data.split(',')[1];
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeApiKey}`;
-      
-      const payload = {
-        contents: [{
-          role: "user",
-          parts: [
-            { text: `分析此化妝品/保養品/商品圖片，辨識出品牌名稱（brand）與產品全名（name），並判斷最合適的主類別（category）與子分類（subcategory）。
-如果商品名稱不是中文（如日文、英文、韓文等），請將產品全名（name）翻譯成繁體中文。
-
-請從以下現有分類中，挑選出最適合此產品的主類別 id 與子分類名稱：
-${categoryOptions}
-
-回傳嚴格的 JSON 格式，包含四個 key: 
-'brand' (字串)
-'name' (字串)
-'category' (字串，主分類 id)
-'subcategory' (字串，子分類名稱)
-
-只回傳純 JSON 內容即可，不要包裝 markdown 三個反引號。` },
-            { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64String } }
-          ]
-        }],
-        generationConfig: { responseMimeType: "application/json" }
-      };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status}`);
-      }
-
-      const result = await response.json();
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      
-      if (text) {
-        const data = JSON.parse(text.trim());
-        setFormBrand(data.brand || '');
-        setFormName(data.name || '');
-        
-        // Find if detected category matches our options
-        const matchCat = categories.find(c => c.id === data.category || c.name.includes(data.category));
-        if (matchCat) {
-          setFormCategory(matchCat.id);
-        } else {
-          setFormCategory(categories[0]?.id || 'makeup');
-        }
-
-        if (data.subcategory) {
-          setFormSubcategory(data.subcategory);
-        }
-
-        setFormPhoto(base64Data);
-        setEditingInstanceId(null);
-        setEditingProductId(null);
-        
-        // Reset secondary form items
-        setFormQty(1);
-        setFormCapacity('');
-        setFormCapacityUnit('ml');
-        setFormUsage('未開封');
-        setFormThreshold(0);
-        setFormExpiry('');
-        setFormPaoMonths('');
-        setFormOpenedDate(new Date().toISOString().split('T')[0]);
-        setFormFinishedDate('');
-
-        setShowAddForm(true);
-        showToast('AI 影像辨識成功，已將資料填入表單！');
-      } else {
-        throw new Error('No parsing results returned.');
-      }
-    } catch (err) {
-      console.error(err);
-      showToast('AI 辨識失敗，請檢查 API Key 是否正確。');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleAiWebSearch = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    const keyword = `${formBrand} ${formName}`.trim();
-    if (keyword.length < 2) {
-      showToast('請至少輸入品牌或產品名稱再進行搜尋！');
-      return;
-    }
-
-    const activeApiKey = getGeminiApiKey();
-    if (!activeApiKey) {
-      showToast('尚未設定 API 金鑰！請至設定頁面設定您的 Gemini API Key。');
-      return;
-    }
-
-    setIsSearchingAi(true);
-
-    // Build category options string
-    const categoryOptions = categories.map(c => 
-      `- ${c.name} (id: ${c.id}), 子分類: ${c.subcategories.join(', ')}`
-    ).join('\n');
-
-    // Try with Google Search tool first
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${activeApiKey}`;
-      const payload = {
-        contents: [{
-          parts: [{
-            text: `你是一個專業的化妝品與保養品資料庫助理。
-請針對使用者輸入的產品關鍵字 "${keyword}" 進行 Google 網路搜尋，尋找其對應的「官方中文/英文品牌名稱」與「官方完整產品全名」（例如：輸入「怪獸唇膏」應帶出品牌「KATE」、產品名「凱婷怪獸級持色唇膏」）。
-
-並請從以下現有分類中，挑選出最適合此產品的分類：
-${categoryOptions}
-
-請將網路搜尋得到的確切資訊，以下列嚴格的 JSON 格式回傳：
-{
-  "brand": "官方品牌中文或英文名稱 (例如 KATE、Dior、雅詩蘭黛、凱婷)",
-  "name": "官方完整產品名稱 (例如 凱婷怪獸級持色唇膏、迪奧精萃再生玫瑰微導粉底)",
-  "category": "選出的主分類 id (例如 makeup)",
-  "subcategory": "選出的子分類名稱 (例如 唇膏)"
-}
-
-請務必使用 Google 搜尋工具。
-不要回傳任何額外的 Markdown 標籤、註解或說明文字。只回傳 JSON 格式字串。`
-          }]
-        }],
-        tools: [{ googleSearch: {} }],
-        generationConfig: { 
-          responseMimeType: "application/json"
-        }
-      };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Google Search query failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (text) {
-        let cleaned = text.trim();
-        if (cleaned.startsWith('```')) {
-          cleaned = cleaned.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '').trim();
-        }
-        const data = JSON.parse(cleaned);
-        if (data.brand) setFormBrand(data.brand);
-        if (data.name) setFormName(data.name);
-        if (data.category && categories.find(c => c.id === data.category)) {
-          setFormCategory(data.category);
-        }
-        if (data.subcategory) {
-          setFormSubcategory(data.subcategory);
-        }
-        showToast('品名網搜補全完成！');
-        return;
-      }
-    } catch (err) {
-      console.warn('Google Search tool failed, trying fallback model generation...', err);
-    }
-
-    // Fallback: Try WITHOUT Google Search tool, using pre-trained knowledge
-    try {
-      const url = `[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$){activeApiKey}`;
-      const payload = {
-        contents: [{
-          parts: [{
-            text: `你是一個專業的化妝品與保養品資料庫助理。
-請針對產品關鍵字 "${keyword}"，根據你的知識庫，查出其對應的「官方中文/英文品牌名稱」與「官方完整產品全名」（例如：輸入「怪獸唇膏」應帶出品牌「KATE」、產品名「凱婷怪獸級持色唇膏」）。
-
-並請從以下現有分類中，挑選出最適合此產品的分類：
-${categoryOptions}
-
-請將正確的資訊，以下列嚴格的 JSON 格式回傳：
-{
-  "brand": "官方品牌中文或英文名稱 (例如 KATE、Dior、雅詩蘭黛、凱婷)",
-  "name": "官方完整產品名稱 (例如 凱婷怪獸級持色唇膏、迪奧精萃再生玫瑰微導粉底)",
-  "category": "選出的主分類 id (例如 makeup)",
-  "subcategory": "選出的子分類名稱 (例如 唇膏)"
-}
-
-不要回傳任何額外的 Markdown 標籤、註解或說明文字。只回傳 JSON 格式字串。`
-          }]
-        }],
-        generationConfig: { 
-          responseMimeType: "application/json"
-        }
-      };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Fallback model query failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (text) {
-        let cleaned = text.trim();
-        if (cleaned.startsWith('```')) {
-          cleaned = cleaned.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '').trim();
-        }
-        const data = JSON.parse(cleaned);
-        if (data.brand) setFormBrand(data.brand);
-        if (data.name) setFormName(data.name);
-        if (data.category && categories.find(c => c.id === data.category)) {
-          setFormCategory(data.category);
-        }
-        if (data.subcategory) {
-          setFormSubcategory(data.subcategory);
-        }
-        showToast('品名 AI 補全完成！');
-      } else {
-        showToast('未搜尋到更完整的產品資訊。');
-      }
-    } catch (err) {
-      console.error('All search/generation attempts failed:', err);
-      showToast('網搜補全失敗，請改為手動輸入。');
-    } finally {
-      setIsSearchingAi(false);
-    }
+    setImageRef(null);
   };
 
   // --- Category Actions & drag/drop Reordering ---
@@ -1297,11 +978,12 @@ ${categoryOptions}
     if (!cat) return;
     askConfirmation(
       '刪除大分類',
-      `確定要刪除「${cat.name}」分類嗎？\n(注意：該分類下的所有商品在主畫面中將暫時無法顯示)`,
+      `刪除「${cat.name}」後，這個分類的商品會暫時不顯示，資料仍會保留。`,
       () => {
         setCategories(categories.filter(c => c.id !== catId));
-        showToast(`已刪除大分類「${cat.name}」`);
-      }
+        showToast(`已刪除「${cat.name}」`);
+      },
+      { confirmLabel: '刪除', danger: true }
     );
   };
 
@@ -1400,7 +1082,7 @@ ${categoryOptions}
     const subName = cat.subcategories[subIndex];
     askConfirmation(
       '刪除小分類',
-      `確定要刪除「${cat.name}」底下的小分類「${subName}」嗎？`,
+      `要刪除「${cat.name}」的「${subName}」嗎？`,
       () => {
         const updated = categories.map(c => {
           if (c.id === catId) {
@@ -1412,8 +1094,9 @@ ${categoryOptions}
           return c;
         });
         setCategories(updated);
-        showToast(`已成功移除小分類「${subName}」`);
-      }
+        showToast(`已刪除「${subName}」`);
+      },
+      { confirmLabel: '刪除', danger: true }
     );
   };
 
@@ -1437,41 +1120,88 @@ ${categoryOptions}
   };
 
   // --- Product CRUD Actions ---
-  const toggleExpandProduct = (prodId: string) => {
-    const next = new Set(expandedProductIds);
-    if (next.has(prodId)) {
-      next.delete(prodId);
-    } else {
-      next.add(prodId);
-    }
-    setExpandedProductIds(next);
-  };
+  const defaultCapacityUnit = capacityUnits.includes('ml') ? 'ml' : (capacityUnits[0] || '');
 
   const clearForm = () => {
     discardPendingFormUpload();
     setFormBrand('');
     setFormName('');
-    setFormCategory(currentTab !== 'settings' && currentTab !== 'history' ? currentTab : categories[0]?.id || 'makeup');
+    setFormCategory(currentTab !== 'settings' ? currentTab : categories[0]?.id || 'makeup');
     setFormSubcategory('');
     setFormQty(1);
     setFormCapacity('');
-    setFormCapacityUnit('ml');
+    setFormCapacityUnit(defaultCapacityUnit);
     setFormUsage('未開封');
-    setFormThreshold(0);
     setFormExpiry('');
     setFormPaoMonths('');
-    setFormOpenedDate(new Date().toISOString().split('T')[0]);
+    setFormOpenedDate(todayStr());
     setFormFinishedDate('');
     setFormPhoto('');
     setFormPhotoThumbnail('');
     setIsFormPhotoRemoved(false);
-    setFormPurchaseDate(new Date().toISOString().split('T')[0]);
+    setFormPurchaseDate(todayStr());
     setFormPurchasePlace('');
     setFormPrice('');
+    setShowMoreFields(false);
+    setShowNewUnitInput(false);
+    setNewUnitName('');
     setEditingInstanceId(null);
     setEditingProductId(null);
     setIsEditingMaster(false);
     setIsAddingInstanceToExisting(false);
+  };
+
+  // Moves one item into the history list as its own archived record.
+  const moveInstanceToHistory = (
+    list: Product[],
+    prodId: string,
+    instId: string,
+    patch: Partial<ProductInstance> = {}
+  ): Product[] => {
+    const product = list.find(p => p.id === prodId);
+    const instance = product?.instances.find(i => i.id === instId);
+    if (!product || !instance) return list;
+    const stamp = Date.now();
+    const archivedProduct: Product = {
+      id: `prod_archived_${stamp}`,
+      category: product.category,
+      subcategory: product.subcategory,
+      brand: product.brand,
+      name: product.name,
+      photo: product.photo,
+      photoThumbnail: product.photoThumbnail,
+      status: 'archived',
+      archivedAt: new Date().toISOString(),
+      threshold: product.threshold,
+      instances: [{ ...instance, ...patch, id: `inst_archived_${stamp}` }]
+    };
+    const remaining = list
+      .map(p => p.id === prodId ? { ...p, instances: p.instances.filter(i => i.id !== instId) } : p)
+      .filter(p => p.instances.length > 0);
+    return [...remaining, archivedProduct];
+  };
+
+  const handleOpenInstance = (prodId: string, instId: string) => {
+    const nextProducts = products.map(prod => prod.id !== prodId ? prod : {
+      ...prod,
+      instances: prod.instances.map(inst => inst.id !== instId ? inst : {
+        ...inst,
+        usage: '使用中' as const,
+        openedDate: inst.openedDate || todayStr()
+      })
+    });
+    commitWithUndo(nextProducts, '已開封');
+  };
+
+  const handleFinishInstance = (prodId: string, instId: string) => {
+    const instance = products.find(p => p.id === prodId)?.instances.find(i => i.id === instId);
+    if (!instance) return;
+    const wasActive = isActiveUsage(instance.usage);
+    const patch: Partial<ProductInstance> = wasActive ? { usage: '已用完', finishedDate: todayStr() } : {};
+    commitWithUndo(
+      moveInstanceToHistory(products, prodId, instId, patch),
+      wasActive ? '已用完，移到歷史紀錄' : '已移到歷史紀錄'
+    );
   };
 
   const handleTabChange = (tabId: string) => {
@@ -1484,19 +1214,19 @@ ${categoryOptions}
     }
   };
 
-  const handleFormSave = (e: React.FormEvent, forceAsNewInstance = false) => {
+  const handleFormSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isUploading) {
-      showToast('圖片仍在上傳，請稍候完成後再儲存');
+      showToast('照片還在上傳，請稍候');
       return;
     }
     if (!formName.trim()) {
-      showToast('請輸入產品名稱！');
+      showToast('請輸入產品名稱');
       return;
     }
-    
+
     if (formQty < 1) {
-      showToast('數量必須大於0！');
+      showToast('數量至少為 1');
       return;
     }
 
@@ -1527,7 +1257,7 @@ ${categoryOptions}
     const priceVal = formPrice ? parseFloat(formPrice) : undefined;
     const finalCapacity = formCapacity ? `${formCapacity}${formCapacityUnit}` : '';
 
-    // A. Edit Master Product Info ONLY (Requirement: Button 3 - editing master info of the product group)
+    // A. Edit the product itself (photo, category, brand, name)
     if (isEditingMaster && editingProductId) {
       const previousPhoto = products.find(prod => prod.id === editingProductId)?.photo;
       const nextPhoto = isFormPhotoRemoved ? undefined : (formPhoto || previousPhoto);
@@ -1540,8 +1270,7 @@ ${categoryOptions}
             brand: formBrand.trim(),
             name: formName.trim(),
             photo: nextPhoto,
-            photoThumbnail: isFormPhotoRemoved ? undefined : (formPhotoThumbnail || prod.photoThumbnail),
-            threshold: Number(formThreshold) || 0
+            photoThumbnail: isFormPhotoRemoved ? undefined : (formPhotoThumbnail || prod.photoThumbnail)
           };
         }
         return prod;
@@ -1551,149 +1280,72 @@ ${categoryOptions}
         queueProductPhotoCleanup(previousPhoto);
       }
       pendingFormUploadRef.current = null;
-      showToast('產品大品項資料修改成功！');
+      showToast('已儲存');
       setShowAddForm(false);
       clearForm();
       return;
     }
 
-    // B. Edit Existing Product Instance
-    if (editingInstanceId && editingProductId && !forceAsNewInstance) {
-      const updatedProducts = products.map(prod => {
-        if (prod.id === editingProductId) {
-          // If the meta parameters (category, brand, subcategory, name) changed, 
-          // we might want to migrate or update them.
-          const isMetaChanged = 
-            prod.category !== formCategory || 
-            prod.subcategory !== subcatValue || 
-            prod.brand !== formBrand.trim() || 
-            prod.name !== formName.trim();
+    const isFinished = formUsage === '已用完' || formUsage === '已丟棄';
+    const itemFields = {
+      capacity: finalCapacity,
+      usage: formUsage,
+      expiry: formExpiry,
+      paoMonths: paoVal,
+      openedDate: openedVal,
+      finishedDate: finishedVal,
+      purchaseDate: purchaseDateVal,
+      purchasePlace: purchasePlaceVal,
+      price: priceVal
+    };
 
-          if (isMetaChanged) {
-            // Remove instance from this product
-            const filteredInstances = prod.instances.filter(inst => inst.id !== editingInstanceId);
-            return { ...prod, instances: filteredInstances };
-          } else {
-            // In-place update of instance
-            const updatedInstances = prod.instances.flatMap(inst => {
-              if (inst.id === editingInstanceId) {
-                return Array.from({ length: formQty }).map((_, idx) => ({
-                  ...inst,
-                  id: idx === 0 ? inst.id : `inst_${Date.now()}_${idx}`,
-                  qty: 1,
-                  capacity: finalCapacity,
-                  usage: formUsage,
-                  expiry: formExpiry,
-                  paoMonths: paoVal,
-                  openedDate: openedVal,
-                  finishedDate: finishedVal,
-                  purchaseDate: purchaseDateVal,
-                  purchasePlace: purchasePlaceVal,
-                  price: priceVal
-                }));
-              }
-              return [inst];
-            });
-            return {
-              ...prod,
-              photo: formPhoto || prod.photo,
-            photoThumbnail: formPhotoThumbnail || prod.photoThumbnail,
-              instances: updatedInstances
-            };
-          }
-        }
-        return prod;
-      }).filter(p => p.instances.length > 0); // Remove products with 0 instances
+    // B. Edit one existing item in place
+    if (editingInstanceId && editingProductId) {
+      const qty = isFinished ? 1 : formQty;
+      let updatedProducts = products.map(prod => {
+        if (prod.id !== editingProductId) return prod;
+        const updatedInstances = prod.instances.flatMap(inst => {
+          if (inst.id !== editingInstanceId) return [inst];
+          return Array.from({ length: qty }).map((_, idx) => ({
+            ...inst,
+            id: idx === 0 ? inst.id : `inst_${Date.now()}_${idx}`,
+            qty: 1,
+            ...itemFields
+          }));
+        });
+        return {
+          ...prod,
+          photo: formPhoto || prod.photo,
+          photoThumbnail: formPhotoThumbnail || prod.photoThumbnail,
+          instances: updatedInstances
+        };
+      });
 
-      // If meta parameters changed, we insert this instance as new item or group under another matching product
-      const isMetaChangedInForm = products.find(p => p.id === editingProductId)?.category !== formCategory ||
-                                  products.find(p => p.id === editingProductId)?.subcategory !== subcatValue ||
-                                  products.find(p => p.id === editingProductId)?.brand !== formBrand.trim() ||
-                                  products.find(p => p.id === editingProductId)?.name !== formName.trim();
-
-      let targetProdId = editingProductId;
-
-      if (isMetaChangedInForm) {
-        // Find if there's an existing matching product group to merge into
-        const matchProd = updatedProducts.find(p => 
-          p.category === formCategory && 
-          p.subcategory === subcatValue && 
-          p.brand === formBrand.trim() && 
-          p.name === formName.trim() && 
-          p.status === 'active'
-        );
-
-        const newInstances: ProductInstance[] = Array.from({ length: formQty }).map((_, idx) => ({
-          id: idx === 0 ? editingInstanceId : `inst_${Date.now()}_${idx}`,
-          qty: 1,
-          capacity: finalCapacity,
-          usage: formUsage,
-          expiry: formExpiry,
-          paoMonths: paoVal,
-          openedDate: openedVal,
-          finishedDate: finishedVal,
-          purchaseDate: purchaseDateVal,
-          purchasePlace: purchasePlaceVal,
-          price: priceVal
-        }));
-
-        if (matchProd) {
-          const matchIndex = updatedProducts.findIndex(p => p.id === matchProd.id);
-          updatedProducts[matchIndex] = {
-            ...matchProd,
-            instances: [...matchProd.instances, ...newInstances],
-            photo: formPhoto || matchProd.photo,
-            photoThumbnail: formPhoto
-              ? (formPhotoThumbnail || matchProd.photoThumbnail)
-              : matchProd.photoThumbnail
-          };
-          targetProdId = matchProd.id;
-        } else {
-          const newProduct: Product = {
-            id: `prod_${Date.now()}`,
-            category: formCategory,
-            subcategory: subcatValue,
-            brand: formBrand.trim(),
-            name: formName.trim(),
-            photo: formPhoto || undefined,
-            photoThumbnail: formPhotoThumbnail || undefined,
-            status: 'active',
-            threshold: Number(formThreshold) || 0,
-            instances: newInstances
-          };
-          updatedProducts.push(newProduct);
-          targetProdId = newProduct.id;
-        }
+      // Used up / thrown away items belong in the history list.
+      const editedProduct = products.find(p => p.id === editingProductId);
+      if (isFinished && editedProduct?.status === 'active') {
+        updatedProducts = moveInstanceToHistory(updatedProducts, editingProductId, editingInstanceId);
+        showToast('已移到歷史紀錄');
+      } else {
+        showToast('已儲存');
       }
-
       setProducts(updatedProducts);
-      const targetProd = updatedProducts.find(p => p.id === targetProdId);
-      if (targetProd) setSelectedDetailProduct(targetProd);
-      showToast('明細修改成功！');
     } else {
-      // C. Create New Product Group or Add Instance to Existing
+      // C. Create a new product, or add items to an existing one
       const newInstances: ProductInstance[] = Array.from({ length: formQty }).map((_, idx) => ({
         id: `inst_${Date.now()}_${idx}`,
         qty: 1,
-        capacity: finalCapacity,
-        usage: formUsage,
-        expiry: formExpiry,
-        paoMonths: paoVal,
-        openedDate: openedVal,
-        finishedDate: finishedVal,
-        purchaseDate: purchaseDateVal,
-        purchasePlace: purchasePlaceVal,
-        price: priceVal
+        ...itemFields
       }));
 
       let existingProductIndex = -1;
-      if ((isAddingInstanceToExisting || forceAsNewInstance) && editingProductId) {
+      if (isAddingInstanceToExisting && editingProductId) {
         existingProductIndex = products.findIndex(p => p.id === editingProductId);
       } else {
-        existingProductIndex = products.findIndex(p => 
-          p.category === formCategory && 
-          p.subcategory === subcatValue && 
-          p.brand === formBrand.trim() && 
+        existingProductIndex = products.findIndex(p =>
+          p.category === formCategory &&
+          p.subcategory === subcatValue &&
+          p.brand === formBrand.trim() &&
           p.name === formName.trim() &&
           p.status === 'active'
         );
@@ -1710,13 +1362,8 @@ ${categoryOptions}
           updated[existingProductIndex].photoThumbnail = formPhotoThumbnail || updated[existingProductIndex].photoThumbnail;
         }
         setProducts(updated);
-        // Expand this product to show the new instance
-        setExpandedProductIds(prev => {
-          const next = new Set(prev);
-          next.add(updated[existingProductIndex].id);
-          return next;
-        });
         setSelectedDetailProduct(updated[existingProductIndex]);
+        showToast(isAddingInstanceToExisting ? `已加入 ${formQty} 件` : `已加入「${formName.trim()}」`);
       } else {
         // Create full new product
         const newProd: Product = {
@@ -1728,18 +1375,13 @@ ${categoryOptions}
           photo: formPhoto || undefined,
           photoThumbnail: formPhotoThumbnail || undefined,
           status: 'active',
-          threshold: Number(formThreshold) || 0,
+          threshold: 0,
           instances: newInstances
         };
         setProducts([...products, newProd]);
-        setExpandedProductIds(prev => {
-          const next = new Set(prev);
-          next.add(newProd.id);
-          return next;
-        });
         setSelectedDetailProduct(newProd);
+        showToast(`已新增「${formName.trim()}」`);
       }
-      showToast(`已成功新增產品：${formName.trim()}`);
     }
 
     setShowAddForm(false);
@@ -1748,70 +1390,21 @@ ${categoryOptions}
     setCurrentTab(formCategory); // Redirect to corresponding category tab
   };
 
-  const handleDuplicateInstanceTrigger = (prod: Product, inst: ProductInstance) => {
-    setEditingProductId(prod.id);
-    setEditingInstanceId(null);
-    setIsEditingMaster(false);
-    setIsAddingInstanceToExisting(true);
-    setFormBrand(prod.brand);
-    setFormName(prod.name);
-    setFormCategory(prod.category);
-    setFormSubcategory(prod.subcategory);
-    setFormQty(inst.qty);
-    
-    // Parse capacity and unit
-    let cap = inst.capacity || '';
-    let unit = 'ml';
-    if (cap.endsWith('ml')) { unit = 'ml'; cap = cap.slice(0, -2); }
-    else if (cap.endsWith('g')) { unit = 'g'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('個')) { unit = '個'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('罐')) { unit = '罐'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('錠')) { unit = '錠'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('顆')) { unit = '顆'; cap = cap.slice(0, -1); }
-    
-    setFormCapacity(cap.trim());
-    setFormCapacityUnit(unit);
-    setFormUsage(inst.usage);
-    setFormThreshold(prod.threshold ? String(prod.threshold) : '');
-    setFormExpiry(inst.expiry);
-    setFormPaoMonths(inst.paoMonths ? String(inst.paoMonths) : '');
-    setFormOpenedDate(inst.openedDate || '');
-    setFormFinishedDate(inst.finishedDate || '');
-    setFormPhoto(prod.photo || '');
-    setFormPhotoThumbnail(prod.photoThumbnail || '');
-    setFormPurchaseDate(new Date().toISOString().split('T')[0]);
-    setFormPurchasePlace(inst.purchasePlace || '');
-    setFormPrice(inst.price !== undefined ? String(inst.price) : '');
-    
-    setShowAddForm(true);
-  };
-
   const handleEditInstanceTrigger = (prod: Product, inst: ProductInstance) => {
+    clearForm();
     setEditingProductId(prod.id);
     setEditingInstanceId(inst.id);
-    setIsEditingMaster(false);
-    setIsAddingInstanceToExisting(false);
 
     setFormBrand(prod.brand);
     setFormName(prod.name);
     setFormCategory(prod.category);
     setFormSubcategory(prod.subcategory);
     setFormQty(inst.qty);
-    
-    // Parse capacity and unit
-    let cap = inst.capacity || '';
-    let unit = 'ml';
-    if (cap.endsWith('ml')) { unit = 'ml'; cap = cap.slice(0, -2); }
-    else if (cap.endsWith('g')) { unit = 'g'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('個')) { unit = '個'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('罐')) { unit = '罐'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('錠')) { unit = '錠'; cap = cap.slice(0, -1); }
-    else if (cap.endsWith('顆')) { unit = '顆'; cap = cap.slice(0, -1); }
-    setFormCapacity(cap.trim());
+    const { amount, unit } = splitCapacity(inst.capacity, capacityUnits);
+    setFormCapacity(amount);
     setFormCapacityUnit(unit);
 
     setFormUsage(inst.usage);
-    setFormThreshold(prod.threshold ? String(prod.threshold) : '');
     setFormExpiry(inst.expiry);
     setFormPaoMonths(inst.paoMonths ? String(inst.paoMonths) : '');
     setFormOpenedDate(inst.openedDate || '');
@@ -1821,154 +1414,92 @@ ${categoryOptions}
     setFormPurchaseDate(inst.purchaseDate || '');
     setFormPurchasePlace(inst.purchasePlace || '');
     setFormPrice(inst.price !== undefined ? String(inst.price) : '');
+    setShowMoreFields(Boolean(inst.paoMonths || inst.purchaseDate || inst.purchasePlace || inst.price !== undefined));
 
     setShowAddForm(true);
-    // Smooth scroll to form
-
   };
 
   const handleEditProductMasterTrigger = (prod: Product) => {
+    clearForm();
     setEditingProductId(prod.id);
-    setEditingInstanceId(null); // No specific instance edit, editing master product details!
     setIsEditingMaster(true);
-    setIsAddingInstanceToExisting(false);
     setFormBrand(prod.brand);
     setFormName(prod.name);
     setFormCategory(prod.category);
     setFormSubcategory(prod.subcategory);
     setFormPhoto(prod.photo || '');
     setFormPhotoThumbnail(prod.photoThumbnail || '');
-    setIsFormPhotoRemoved(false);
-    // Reset instance specific states to default
-    setFormQty(1);
-    setFormCapacity('');
-    setFormCapacityUnit('ml');
-    setFormUsage('未開封');
-    setFormThreshold(0);
-    setFormExpiry('');
-    setFormPaoMonths('');
-    setFormOpenedDate(new Date().toISOString().split('T')[0]);
-    setFormFinishedDate('');
-    setFormPurchaseDate(new Date().toISOString().split('T')[0]);
-    setFormPurchasePlace('');
-    setFormPrice('');
-
     setShowAddForm(true);
-    setSelectedDetailProduct(null); // Close detail screen
-
-  };
-
-  // Add same-product as a new instance (Save as new item)
-  const handleSaveAsNewInstance = () => {
-    // Trigger submit indirectly but tell it to force create new
-    const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-    handleFormSave(fakeEvent, true);
   };
 
   const handleRestoreMaster = (archivedProduct: Product) => {
     askConfirmation(
       '還原紀錄',
-      `確定要還原「${archivedProduct.name}」的所有紀錄嗎？
-還原後將回到原本的分類中。`,
+      `要把「${archivedProduct.name}」放回原本的分類嗎？`,
       () => {
         let updatedProducts = [...products];
         // Remove the archived product from the list
         updatedProducts = updatedProducts.filter(p => p.id !== archivedProduct.id);
-        
+
+        // A used-up / thrown-away item comes back as "in use"
+        const restoredInstances = archivedProduct.instances.map(inst => (
+          isActiveUsage(inst.usage) ? inst : { ...inst, usage: '使用中' as const, finishedDate: undefined }
+        ));
+
         // Find if there is an active product with the exact same details
-        const existingActiveProductIndex = updatedProducts.findIndex(p => 
+        const existingActiveProductIndex = updatedProducts.findIndex(p =>
           p.status === 'active' &&
           p.category === archivedProduct.category &&
           p.brand === archivedProduct.brand &&
           p.name === archivedProduct.name
         );
-        
+
         if (existingActiveProductIndex >= 0) {
           // Merge instances into the existing active product
           updatedProducts[existingActiveProductIndex] = {
             ...updatedProducts[existingActiveProductIndex],
             instances: [
               ...updatedProducts[existingActiveProductIndex].instances,
-              ...archivedProduct.instances
+              ...restoredInstances
             ]
           };
         } else {
           // No existing active product, just change status back to active
           updatedProducts.push({
             ...archivedProduct,
-            status: 'active'
+            status: 'active',
+            archivedAt: undefined,
+            instances: restoredInstances
           });
         }
         
         setProducts(updatedProducts);
         queueProductPhotoCleanup(archivedProduct.photo);
-        showToast('已成功還原紀錄！');
-      }
+        showToast('已還原');
+      },
+      { confirmLabel: '還原' }
     );
   };
 
-  // Archive a specific product instance (Requirement 4)
-  const handleArchiveInstance = (prodId: string, instId: string) => {
+  const handleDeleteArchivedProduct = (product: Product) => {
     askConfirmation(
-      '移至歷史紀錄（封存）',
-      '確定要將這個規格明細移到歷史紀錄（封存）嗎？封存後將移至歷史分頁。',
+      '永久刪除',
+      `「${product.name}」的這筆紀錄會被永久刪除，無法復原。`,
       () => {
-        let archivedInstance: ProductInstance | null = null;
-        let targetProduct: Product | null = null;
-
-        const nextProducts = products.map(prod => {
-          if (prod.id === prodId) {
-            targetProduct = prod;
-            archivedInstance = prod.instances.find(i => i.id === instId) || null;
-            return {
-              ...prod,
-              instances: prod.instances.filter(i => i.id !== instId)
-            };
-          }
-          return prod;
-        }).filter(p => p.instances.length > 0);
-
-        if (archivedInstance && targetProduct) {
-          // Create separate archived product group in history
-          const newArchivedProd: Product = {
-            id: `prod_archived_${Date.now()}`,
-            category: (targetProduct as Product).category,
-            subcategory: (targetProduct as Product).subcategory,
-            brand: (targetProduct as Product).brand,
-            name: (targetProduct as Product).name,
-            photo: (targetProduct as Product).photo,
-            status: 'archived',
-            archivedAt: new Date().toISOString(),
-            threshold: (targetProduct as Product).threshold,
-            instances: [{
-              ...(archivedInstance as ProductInstance),
-              id: `inst_archived_${Date.now()}`
-            }]
-          };
-          const finalProducts = [...nextProducts, newArchivedProd];
-          setProducts(finalProducts);
-          showToast('已將該明細歸檔至歷史紀錄！');
-
-          // If the detailed modal is open for this product, sync it or close if empty
-          if (selectedDetailProduct && selectedDetailProduct.id === prodId) {
-            const updatedDetailedProduct = finalProducts.find(p => p.id === prodId);
-            if (updatedDetailedProduct) {
-              setSelectedDetailProduct(updatedDetailedProduct);
-            } else {
-              setSelectedDetailProduct(null);
-            }
-          }
-        }
-      }
+        setProducts(products.filter(item => item.id !== product.id));
+        queueProductPhotoCleanup(product.photo);
+        showToast('已刪除');
+      },
+      { confirmLabel: '刪除', danger: true }
     );
   };
 
-  // Delete specific product instance
+  // Delete the item being edited
   const handleDeleteInstance = () => {
     if (editingInstanceId && editingProductId) {
       askConfirmation(
-        '永久刪除明細',
-        '確定要永久刪除此商品明細嗎？此操作無法復原。',
+        '刪除這一件',
+        '刪除後無法復原。用完的話，請改用「用完」，紀錄才會留在歷史裡。',
         () => {
           const nextProducts = products.map(prod => {
             if (prod.id === editingProductId) {
@@ -1987,73 +1518,55 @@ ${categoryOptions}
           }
           setShowAddForm(false);
           clearForm();
-          showToast('明細已成功永久刪除！');
-
-          // If detail modal is open for this product, sync or close
-          if (selectedDetailProduct && selectedDetailProduct.id === editingProductId) {
-            const updatedDetailedProduct = nextProducts.find(p => p.id === editingProductId);
-            if (updatedDetailedProduct) {
-              setSelectedDetailProduct(updatedDetailedProduct);
-            } else {
-              setSelectedDetailProduct(null);
-            }
-          }
-        }
+          showToast('已刪除');
+        },
+        { confirmLabel: '刪除', danger: true }
       );
     }
   };
 
-  const handleDeleteInstanceDirect = (prodId: string, instId: string) => {
+  const handleDeleteProduct = () => {
+    if (!editingProductId) return;
     askConfirmation(
-      '永久刪除明細',
-      '確定要永久刪除此規格明細嗎？此操作無法復原。',
+      '刪除整個品項',
+      '這個品項和底下所有庫存都會被永久刪除，無法復原。',
       () => {
-        const nextProducts = products.map(prod => {
-          if (prod.id === prodId) {
-            return {
-              ...prod,
-              instances: prod.instances.filter(i => i.id !== instId)
-            };
-          }
-          return prod;
-        }).filter(p => p.instances.length > 0);
-
-        setProducts(nextProducts);
-        const removedProduct = products.find(product => product.id === prodId);
-        if (removedProduct && !nextProducts.some(product => product.id === prodId)) {
-          queueProductPhotoCleanup(removedProduct.photo);
-        }
-        showToast('規格明細已成功永久刪除！');
-
-        // If detail modal is open, sync or close
-        if (selectedDetailProduct && selectedDetailProduct.id === prodId) {
-          const updatedDetailedProduct = nextProducts.find(p => p.id === prodId);
-          if (updatedDetailedProduct) {
-            setSelectedDetailProduct(updatedDetailedProduct);
-          } else {
-            setSelectedDetailProduct(null);
-          }
-        }
-      }
+        const removedProduct = products.find(product => product.id === editingProductId);
+        setProducts(products.filter(product => product.id !== editingProductId));
+        queueProductPhotoCleanup(removedProduct?.photo);
+        setShowAddForm(false);
+        setSelectedDetailProduct(null);
+        clearForm();
+        showToast('已刪除');
+      },
+      { confirmLabel: '刪除', danger: true }
     );
   };
 
-  // Quick prepopulate form when adding another instance under a product
+  // "再加一瓶": prefill from the latest item of this product
   const handleAddAnotherInstanceTrigger = (prod: Product) => {
     clearForm();
-    setEditingProductId(prod.id); // set this to ensure we know it belongs to an existing product
+    setEditingProductId(prod.id);
     setIsAddingInstanceToExisting(true);
-    setIsEditingMaster(false);
     setFormBrand(prod.brand);
     setFormName(prod.name);
     setFormCategory(prod.category);
     setFormSubcategory(prod.subcategory);
-    setFormUsage('未開封');
     setFormPhoto(prod.photo || '');
     setFormPhotoThumbnail(prod.photoThumbnail || '');
-    
-    setShowAddForm(true);
 
+    const template = prod.instances[prod.instances.length - 1];
+    if (template) {
+      const { amount, unit } = splitCapacity(template.capacity, capacityUnits);
+      setFormCapacity(amount);
+      setFormCapacityUnit(unit);
+      setFormPaoMonths(template.paoMonths ? String(template.paoMonths) : '');
+      setFormPurchasePlace(template.purchasePlace || '');
+      setFormPrice(template.price !== undefined ? String(template.price) : '');
+      setShowMoreFields(Boolean(template.paoMonths || template.purchasePlace || template.price !== undefined));
+    }
+
+    setShowAddForm(true);
   };
 
   const currentSearchCategory = categories.find(category => category.id === currentTab);
@@ -2122,7 +1635,7 @@ ${categoryOptions}
     let totalQty = 0;
     matchedProds.forEach(p => {
       p.instances.forEach(i => {
-        totalQty += i.qty;
+        if (isActiveUsage(i.usage)) totalQty += i.qty;
       });
     });
     return { count: totalCount, qty: totalQty };
@@ -2150,53 +1663,62 @@ ${categoryOptions}
     const dataStr = URL.createObjectURL(blob);
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `cosmetics_backup_${new Date().toISOString().split('T')[0]}.txt`);
+    downloadAnchorNode.setAttribute("download", `cosmetics_backup_${todayStr()}.txt`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
     setTimeout(() => URL.revokeObjectURL(dataStr), 100);
-    showToast("備份檔已下載，您可以將其上傳至 Google Drive 保存");
+    showToast('備份檔已下載');
+  };
+
+  const applyBackup = async (json: any) => {
+    setCategories(json.categories);
+    if (json.capacityUnits) setCapacityUnits(json.capacityUnits);
+    setProducts(json.products);
+    showToast('已還原，正在同步到雲端');
+
+    localStorage.setItem(`cosmetics_backup_categories_${user.uid}`, JSON.stringify(json.categories));
+    localStorage.setItem(`cosmetics_backup_products_${user.uid}`, JSON.stringify(json.products));
+
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await setDoc(userRef, { categories: json.categories, updatedAt: new Date().toISOString() }, { merge: true });
+      for (const p of json.products) {
+        await setDoc(doc(db, 'users', user.uid, 'products', p.id), p);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('雲端同步失敗，稍後會再試');
+    }
   };
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const target = e.target;
     const file = target.files?.[0];
+    target.value = ''; // allow choosing the same file again
     if (!file) return;
-    
+
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
-        if (json.categories && json.products) {
-          setCategories(json.categories);
-          if (json.capacityUnits) setCapacityUnits(json.capacityUnits);
-          setProducts(json.products);
-          showToast("資料已成功還原！正在同步至雲端...");
-          
-          // Force save to localStorage immediately
-          target.value = ""; // clear input
-          localStorage.setItem(`cosmetics_backup_categories_${user.uid}`, JSON.stringify(json.categories));
-          localStorage.setItem(`cosmetics_backup_products_${user.uid}`, JSON.stringify(json.products));
-          
-          if (user) {
-             const userRef = doc(db, 'users', user.uid);
-             await setDoc(userRef, { categories: json.categories, updatedAt: new Date().toISOString() }, { merge: true });
-             for (const p of json.products) {
-               await setDoc(doc(db, 'users', user.uid, 'products', p.id), p);
-             }
-          }
-        } else {
-          showToast("備份檔格式不正確");
+        if (!json.categories || !json.products) {
+          showToast('備份檔格式不正確');
+          return;
         }
+        const backupDate = json.exportDate ? new Date(json.exportDate).toLocaleDateString() : '';
+        askConfirmation(
+          '從備份還原',
+          `目前的資料會被備份檔${backupDate ? `（${backupDate}）` : ''}取代，共 ${json.products.length} 筆品項。`,
+          () => { void applyBackup(json); },
+          { confirmLabel: '還原', danger: true }
+        );
       } catch (err) {
-        target.value = "";
         console.error(err);
-        showToast("讀取備份檔失敗");
+        showToast('讀取備份檔失敗');
       }
     };
     reader.readAsText(file);
-    // reset input
-    e.target.value = '';
   };
 
   // Get current subcategories for selected form category
@@ -2227,131 +1749,122 @@ ${categoryOptions}
       <div className="min-h-screen bg-retro-bg flex items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-4">
           <Sparkles className="w-8 h-8 text-retro-primary animate-pulse" />
-          <span className="text-retro-text font-bold text-sm tracking-wider uppercase">Loading...</span>
+          <span className="text-retro-text/60 font-bold text-sm tracking-wider">載入中</span>
         </div>
       </div>
     );
   }
 
+  // --- Shared form styles ---
+  const inputClass = 'w-full h-11 px-3 bg-white/70 border border-retro-text/10 rounded-xl text-sm text-retro-text font-medium focus:outline-none focus:border-retro-primary focus:ring-1 focus:ring-retro-primary/30';
+  const labelClass = 'block text-xs font-bold text-retro-text/60 mb-1.5';
+  const fmtDate = (date?: string) => (date ? date.replace(/-/g, '/') : '—');
+  const usageChipClass = (usage: ProductInstance['usage']) =>
+    usage === '使用中' ? 'bg-retro-primary/15 text-retro-primary'
+      : usage === '未開封' ? 'bg-retro-text/5 text-retro-text/60'
+      : usage === '已丟棄' ? 'bg-retro-danger/10 text-retro-danger'
+      : 'bg-retro-secondary/10 text-retro-secondary';
+  const archivedCount = products.filter(p => p.status === 'archived').length;
+
+  const renderSettingsHeader = (title: string) => (
+    <div className="flex items-center gap-1 mb-3 -ml-2">
+      <button
+        onClick={() => setSettingsView('menu')}
+        className="w-10 h-10 rounded-full flex items-center justify-center text-retro-text/60 hover:bg-retro-card active:bg-retro-card transition-colors"
+        aria-label="返回設定"
+      >
+        <ChevronLeft className="w-5 h-5" />
+      </button>
+      <h2 className="text-lg font-bold font-display text-retro-text">{title}</h2>
+    </div>
+  );
+
   return (
 
       <div className="min-h-screen bg-retro-bg text-retro-text relative pb-24 font-sans select-none antialiased">
-      {syncState !== 'current' && (
-        <div className={`sticky top-0 z-50 px-4 py-2 text-center text-xs font-semibold border-b ${syncState === 'stale' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-retro-card text-retro-text/70 border-retro-text/10'}`} role="status">
-          {syncState === 'stale'
-            ? `目前離線或無法連線，顯示上次同步內容${lastSyncedAt ? `（${new Date(lastSyncedAt).toLocaleString()}）` : ''}，尚未更新。`
-            : '已顯示本機內容，正在背景同步最新資料…'}
+      {syncState === 'stale' && (
+        <div className="sticky top-0 z-50 px-4 py-2 text-center text-xs font-semibold border-b bg-amber-50 text-amber-800 border-amber-200" role="status">
+          {`離線中，顯示上次同步的內容${lastSyncedAt ? `（${new Date(lastSyncedAt).toLocaleString()}）` : ''}`}
         </div>
       )}
       {/* 1. App Header */}
-      <header className={`px-5 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky z-40 border-b border-retro-text/10 max-w-2xl mx-auto ${syncState === 'current' ? 'top-0' : 'top-8'}`}>
+      <header className={`px-5 py-4 pt-[max(1rem,env(safe-area-inset-top))] flex justify-between items-center bg-retro-bg/90 backdrop-blur-sm sticky z-40 border-b border-retro-text/10 max-w-2xl mx-auto ${syncState === 'stale' ? 'top-8' : 'top-0'}`}>
         <h1 className="text-2xl font-bold font-display tracking-tight flex items-center gap-2">
           <span>用品管理系統</span>
+          {syncState === 'refreshing' && (
+            <RefreshCw className="w-4 h-4 text-retro-text/25 animate-spin" aria-label="同步中" />
+          )}
         </h1>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => galleryInputRef.current?.click()}
-            className="w-11 h-11 rounded-full bg-retro-primary text-retro-card flex items-center justify-center cursor-pointer shadow-md active:scale-95 transition-all hover:brightness-105"
-            title="照片辨識新增"
-          >
-            <ImageIcon className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="w-11 h-11 rounded-full bg-retro-primary text-retro-card flex items-center justify-center cursor-pointer shadow-md active:scale-95 transition-all hover:brightness-105"
-            title="拍照辨識新增"
-          >
-            <Camera className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => {
-              if (showAddForm) {
-                setShowAddForm(false);
-                clearForm();
-              } else {
-                clearForm();
-                setShowAddForm(true);
-
-              }
-            }}
-            className="w-11 h-11 rounded-full bg-retro-secondary text-retro-card flex items-center justify-center cursor-pointer shadow-md active:scale-95 transition-all hover:brightness-105"
-            title="手動輸入新增"
-          >
-            <Plus className="w-5 h-5 transition-transform" style={{ transform: showAddForm ? 'rotate(45deg)' : 'rotate(0)' }} />
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            clearForm();
+            setShowAddForm(true);
+          }}
+          className="w-11 h-11 rounded-full bg-retro-secondary text-retro-card flex items-center justify-center cursor-pointer shadow-sm active:scale-95 transition-all hover:brightness-105"
+          aria-label="新增商品"
+          title="新增商品"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
       </header>
 
-      {/* Hidden file triggers */}
-      <input 
-        type="file" 
-        ref={fileInputRef}
-        onChange={(e) => handlePhotoUpload(e, false)}
-        accept="image/*" 
-        capture="environment" 
-        className="hidden"
-      />
-      <input 
-        type="file" 
-        ref={galleryInputRef}
-        onChange={(e) => handlePhotoUpload(e, false)}
-        accept="image/*" 
-        className="hidden"
-      />
-
-      <div className="max-w-2xl mx-auto px-4 mt-2">
-        {/* 2. Expired Notification Banner (Requirement 3) */}
-        {expiredPaoItems.length > 0 && showNotificationBanner && (
-          <div className="mb-4 p-4 rounded-xl bg-red-100 border border-red-300 text-red-900 shadow-sm relative overflow-hidden animate-fade-in">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5 animate-bounce" />
-              <div className="flex-1">
-                <div className="font-bold text-sm flex justify-between items-center pr-6">
-                  <span>📢 開封過期變質警報！</span>
-                </div>
-                <p className="text-xs text-red-800 mt-1">
-                  以下產品已超出開封後建議使用期限，極易滋生細菌變質，請儘速替換：
-                </p>
-                <ul className="mt-2 flex flex-col gap-1.5 max-h-32 overflow-y-auto">
-                  {expiredPaoItems.map((item, idx) => (
-                    <li key={idx} className="text-xs flex flex-wrap justify-between items-center bg-red-50 p-2 rounded border border-red-200">
-                      <div>
-                        <span className="font-semibold text-red-950">[{item.product.brand}] {item.product.name}</span>
-                        {item.instance.capacity && <span className="ml-1 text-[10px] bg-red-200 text-red-800 px-1 rounded">{item.instance.capacity}</span>}
-                      </div>
-                      <div className="text-[11px] font-bold text-red-700">
-                        已過期 {item.daysOverdue} 天 (開封: {item.instance.openedDate})
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+      <div className="max-w-2xl mx-auto px-4 mt-3">
+        {/* 2. Opened-too-long reminder */}
+        {expiredPaoItems.length > 0 && showNotificationBanner && currentTab !== 'settings' && (
+          <div className="mb-4 rounded-2xl bg-retro-danger/10 border border-retro-danger/15 text-retro-danger overflow-hidden animate-fade-in">
+            <div className="flex items-center">
+              <button
+                onClick={() => setIsExpiredListOpen(open => !open)}
+                className="flex-1 min-w-0 flex items-center gap-2 pl-4 py-3 text-left text-sm font-bold"
+                aria-expanded={isExpiredListOpen}
+              >
+                <CircleAlert className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{expiredPaoItems.length} 件已超過開封期限</span>
+                <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${isExpiredListOpen ? 'rotate-180' : ''}`} />
+              </button>
+              <button
+                onClick={() => setShowNotificationBanner(false)}
+                className="w-11 h-11 flex-shrink-0 flex items-center justify-center text-retro-danger/60 hover:text-retro-danger"
+                aria-label="關閉提醒"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <button 
-              onClick={() => setShowNotificationBanner(false)}
-              className="absolute top-3 right-3 text-red-600 hover:text-red-950 p-0.5 rounded-full hover:bg-red-200 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            {isExpiredListOpen && (
+              <ul className="px-2.5 pb-2.5 space-y-1.5">
+                {expiredPaoItems.map((item) => (
+                  <li key={item.instance.id}>
+                    <button
+                      onClick={() => setSelectedDetailProduct(item.product)}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-white/70 hover:bg-white text-left text-xs transition-colors"
+                    >
+                      <span className="min-w-0 truncate font-semibold text-retro-text">{item.product.brand} {item.product.name}</span>
+                      <span className="flex-shrink-0 font-bold">過期 {item.daysOverdue} 天</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
         {/* 3. Search Bar */}
         {currentTab !== 'settings' && (
-          <div className="mb-5 flex items-center gap-2">
+          <div className="mb-4 flex items-center gap-2">
             <div className="relative min-w-0 flex-1">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-retro-text/40 w-4.5 h-4.5" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-retro-text/40 w-4.5 h-4.5 pointer-events-none" />
               <input
                 type="text"
-                placeholder="搜尋品牌或產品..."
+                enterKeyHint="search"
+                placeholder="搜尋品牌或產品"
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
-                className="w-full pl-11 pr-10 py-3 bg-retro-card rounded-2xl text-sm border border-retro-text/5 focus:outline-none focus:ring-1 focus:ring-retro-primary shadow-inner text-retro-text font-medium"
+                className="w-full pl-11 pr-11 py-3 bg-retro-card rounded-2xl text-sm border border-retro-text/5 focus:outline-none focus:ring-1 focus:ring-retro-primary shadow-inner text-retro-text font-medium"
               />
               {searchKeyword && (
                 <button
                   onClick={() => setSearchKeyword('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-retro-text/50 hover:text-retro-text p-1"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-retro-text/50 hover:text-retro-text"
                   aria-label="清除搜尋文字"
                 >
                   <X className="w-4 h-4" />
@@ -2377,122 +1890,97 @@ ${categoryOptions}
           </div>
         )}
 
-        {/* 4. Dynamic AI Status Loading Overlay */}
-        {isAnalyzing && (
-          <div className="fixed inset-0 bg-stone-900/85 z-50 flex items-center justify-center p-6 backdrop-blur-sm">
-            <div className="bg-retro-card p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl border border-retro-primary/20">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-4 border-retro-primary border-t-transparent animate-spin"></div>
-                <h3 className="font-bold font-display text-lg tracking-wide flex items-center gap-1.5 justify-center">
-                  <Sparkles className="w-5 h-5 text-retro-secondary animate-pulse" />
-                  AI 影像辨識中...
-                </h3>
-                <div className="w-full bg-retro-bg rounded-full h-2 overflow-hidden mt-1">
-                  <div className="bg-retro-primary h-full animate-progress" style={{ width: '75%' }}></div>
-                </div>
-                <p className="text-xs text-retro-text/75 font-semibold mt-1">{aiStatusText}</p>
-              </div>
-            </div>
-          </div>
-        )}
-        {isUploading && (
-          <div className="fixed inset-0 bg-stone-900/85 z-50 flex items-center justify-center p-6 backdrop-blur-sm">
-            <div className="bg-retro-card p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl border border-retro-primary/20">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-4 border-retro-primary border-t-transparent animate-spin"></div>
-                <h3 className="font-bold font-display text-lg tracking-wide flex items-center gap-1.5 justify-center">
-                  照片上傳中...
-                </h3>
-                <p className="text-xs text-retro-text/75 font-semibold mt-1">請稍候</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-
         {/* 5. Add / Edit Product Form */}
         {showAddForm && (
-          <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-[60] flex items-center justify-center p-4 animate-fade-in pb-safe">
-            <div id="manual-add-form" className="w-full max-w-md max-h-[90dvh] overflow-y-auto bg-retro-card rounded-2xl border border-retro-primary/30 shadow-2xl p-5 relative">
-            <div className="flex justify-between items-center mb-4 pb-2 border-b border-retro-text/5">
-              <h3 className="text-lg font-bold text-retro-secondary flex items-center gap-2">
-                <Sparkles className="w-5 h-5" />
-                {isEditingMaster ? '編輯大品項' : editingInstanceId ? '修改明細資訊' : isAddingInstanceToExisting ? '新增規格明細' : '確認新增品項'}
-              </h3>
-              <button 
-                type="button" 
-                onClick={() => {
-                  setShowAddForm(false);
-                  clearForm();
-                }}
-                className="text-retro-text/50 hover:text-retro-text p-1 rounded-full hover:bg-retro-bg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+          <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-[60] flex items-end sm:items-center justify-center sm:p-4 animate-fade-in">
+            <form
+              id="manual-add-form"
+              onSubmit={handleFormSave}
+              className="w-full sm:max-w-md max-h-[92dvh] flex flex-col bg-retro-card rounded-t-3xl sm:rounded-3xl border border-retro-text/10 shadow-2xl animate-slide-up"
+            >
+              <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-retro-text/5">
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-retro-text">
+                    {isEditingMaster ? '編輯品項' : editingInstanceId ? '編輯這一件' : isAddingInstanceToExisting ? '再加一瓶' : '新增商品'}
+                  </h3>
+                  {(editingInstanceId || isAddingInstanceToExisting) && (
+                    <p className="text-xs font-semibold text-retro-text/50 truncate mt-0.5">{formBrand} {formName}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    clearForm();
+                  }}
+                  className="w-9 h-9 -mr-2 -mt-1 flex-shrink-0 rounded-full flex items-center justify-center text-retro-text/50 hover:text-retro-text hover:bg-retro-bg transition-colors"
+                  aria-label="關閉"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <form onSubmit={handleFormSave} className="space-y-4">
-              {/* ====== MASTER PRODUCT FIELDS ====== */}
+              <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-4">
+              {/* ====== PRODUCT FIELDS ====== */}
               {(!editingInstanceId && !isAddingInstanceToExisting) && (
                 <div className="space-y-4">
-                  {/* Photo Select */}
-                  <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1.5">
-                      產品照片 (選填)
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="file" 
-                        ref={formPhotoInputRef}
-                        onChange={(e) => handlePhotoUpload(e, true)}
-                        accept="image/*"
-                        className="hidden"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => formPhotoInputRef.current?.click()}
-                        className="w-10 h-10 rounded-xl bg-retro-primary text-retro-card flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 transition-all"
-                      >
-                        <Camera className="w-4 h-4" />
-                      </button>
-                      {formPhoto ? (
-                        <div className="flex items-center gap-2">
-                          <img 
-                            src={formPhoto} 
-                            alt="預覽" 
-                            loading="lazy"
-                            className="h-10 w-auto max-w-[4rem] rounded-lg object-cover border border-retro-text/10"
-                          />
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              setFormPhoto('');
-                              setFormPhotoThumbnail('');
-                              setIsFormPhotoRemoved(true);
-                              discardPendingFormUpload();
-                            }}
-                            className="text-xs text-red-500 font-bold hover:underline"
-                          >
-                            移除
-                          </button>
-                        </div>
+                  {/* Photo */}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="file"
+                      ref={formPhotoInputRef}
+                      onChange={handlePhotoUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => formPhotoInputRef.current?.click()}
+                      disabled={isUploading}
+                      className="w-16 h-16 flex-shrink-0 rounded-2xl border border-dashed border-retro-text/20 bg-white/60 flex items-center justify-center text-retro-text/40 overflow-hidden hover:border-retro-primary/60 transition-colors"
+                      aria-label={formPhoto ? '更換照片' : '加入照片'}
+                    >
+                      {isUploading ? (
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                      ) : formPhoto ? (
+                        <img src={formPhoto} alt="產品照片" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="text-xs text-retro-text/40 font-medium">尚未選擇照片</span>
+                        <Camera className="w-5 h-5" />
                       )}
+                    </button>
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="text-xs font-bold text-retro-text/60">{isUploading ? '照片上傳中…' : '產品照片'}</span>
+                      {formPhoto && !isUploading ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormPhoto('');
+                            setFormPhotoThumbnail('');
+                            setIsFormPhotoRemoved(true);
+                            discardPendingFormUpload();
+                          }}
+                          className="text-xs font-bold text-retro-danger hover:underline"
+                        >
+                          移除照片
+                        </button>
+                      ) : !isUploading ? (
+                        <span className="text-xs text-retro-text/40">選填</span>
+                      ) : null}
                     </div>
                   </div>
 
-                  {/* Main Category & Subcategory */}
+                  {/* Category & Subcategory */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-retro-text/75 mb-1">主類別</label>
-                      <select 
+                      <label className={labelClass} htmlFor="f-category">主類別</label>
+                      <select
+                        id="f-category"
                         value={formCategory}
                         onChange={(e) => {
                           setFormCategory(e.target.value);
                           setFormSubcategory(''); // reset
                         }}
-                        className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
+                        className={inputClass}
                       >
                         {categories.map(cat => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -2501,139 +1989,140 @@ ${categoryOptions}
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-retro-text/75 mb-1">子分類</label>
-                      <div className="space-y-2">
-                        <select 
-                          value={
-                            currentFormSubcategories.includes(formSubcategory)
-                              ? formSubcategory
-                              : formSubcategory === '' 
-                                ? '' 
-                                : 'custom'
+                      <label className={labelClass} htmlFor="f-subcategory">子分類</label>
+                      <select
+                        id="f-subcategory"
+                        value={
+                          currentFormSubcategories.includes(formSubcategory)
+                            ? formSubcategory
+                            : formSubcategory === ''
+                              ? ''
+                              : 'custom'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'custom') {
+                            setFormSubcategory('自訂子分類');
+                          } else {
+                            setFormSubcategory(val);
                           }
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === 'custom') {
-                              setFormSubcategory('自訂子分類');
-                            } else {
-                              setFormSubcategory(val);
-                            }
-                          }}
-                          className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                        >
-                          <option value="">請選擇子分類</option>
-                          {currentFormSubcategories.map((sub, idx) => (
-                            <option key={idx} value={sub}>{sub}</option>
-                          ))}
-                          <option value="custom">✍️ 自訂其他...</option>
-                        </select>
-
-                        {(formSubcategory !== '' && !currentFormSubcategories.includes(formSubcategory)) && (
-                          <input 
-                            type="text" 
-                            placeholder="請輸入自訂子分類名稱"
-                            value={formSubcategory === '自訂子分類' ? '' : formSubcategory}
-                            onChange={(e) => setFormSubcategory(e.target.value)}
-                            className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                          />
-                        )}
-                      </div>
+                        }}
+                        className={inputClass}
+                      >
+                        <option value="">請選擇</option>
+                        {currentFormSubcategories.map((sub, idx) => (
+                          <option key={idx} value={sub}>{sub}</option>
+                        ))}
+                        <option value="custom">自訂…</option>
+                      </select>
                     </div>
                   </div>
 
-                  {/* Brand Name */}
+                  {(formSubcategory !== '' && !currentFormSubcategories.includes(formSubcategory)) && (
+                    <input
+                      type="text"
+                      placeholder="自訂子分類名稱"
+                      aria-label="自訂子分類名稱"
+                      value={formSubcategory === '自訂子分類' ? '' : formSubcategory}
+                      onChange={(e) => setFormSubcategory(e.target.value)}
+                      className={inputClass}
+                    />
+                  )}
+
+                  {/* Brand */}
                   <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1">品牌名稱</label>
-                    <input 
-                      type="text" 
-                      placeholder="請輸入品牌"
+                    <label className={labelClass} htmlFor="f-brand">品牌</label>
+                    <input
+                      id="f-brand"
+                      type="text"
                       value={formBrand}
                       onChange={(e) => setFormBrand(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
+                      className={inputClass}
                     />
                   </div>
 
-                  {/* Product Name & AI Web Search Assist */}
+                  {/* Product Name */}
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="text-xs font-bold text-retro-text/75">產品名稱</label>
-                      {isSearchingAi && <span className="text-[10px] text-retro-primary animate-pulse font-semibold">AI 正在網搜中...</span>}
-                    </div>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        placeholder="請輸入產品名稱"
-                        value={formName}
-                        onChange={(e) => setFormName(e.target.value)}
-                        className="flex-1 p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                      />
-                      <button 
-                        type="button"
-                        onClick={handleAiWebSearch}
-                        className="w-10 h-10 rounded-xl bg-retro-primary text-retro-card flex items-center justify-center hover:opacity-90 active:scale-95 transition-all flex-shrink-0"
-                        title="網路搜尋官方完整品牌與品名"
-                      >
-                        <Search className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Threshold */}
-                  <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1">補貨門檻數量</label>
-                    <input 
-                      type="number" 
-                      min="0"
-                      placeholder="低於此數量時提醒 (0)"
-                      value={formThreshold === 0 ? '' : formThreshold}
-                      onChange={(e) => setFormThreshold(e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
+                    <label className={labelClass} htmlFor="f-name">產品名稱</label>
+                    <input
+                      id="f-name"
+                      type="text"
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      className={inputClass}
                     />
-                    <p className="text-[10px] text-retro-text/50 mt-1">此品項所有未開封明細之數量加總低於此設定時，會顯示補貨提醒</p>
                   </div>
                 </div>
               )}
 
-              {/* ====== INSTANCE PRODUCT FIELDS ====== */}
+              {/* ====== ITEM FIELDS ====== */}
               {!isEditingMaster && (
                 <div className="space-y-4">
                   {/* Quantity and Capacity */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-retro-text/75 mb-1">數量</label>
-                  <input 
-                    type="number" 
-                    placeholder="例如: 1"
-                    value={formQty === 0 ? '' : formQty}
-                    onChange={(e) => setFormQty(e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-retro-text/75 mb-1">容量</label>
-                  <input 
-                    type="text" 
-                    placeholder="例如: 30"
-                    value={formCapacity}
-                    onChange={(e) => setFormCapacity(e.target.value)}
-                    className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-retro-text/75 mb-1">單位</label>
-                  {showNewUnitInput ? (
-                    <div className="flex items-center gap-1">
+                  <div className="grid grid-cols-[1fr_1.3fr_1.2fr] gap-2.5">
+                    <div>
+                      <label className={labelClass} htmlFor="f-qty">數量</label>
+                      <input
+                        id="f-qty"
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={formQty === 0 ? '' : formQty}
+                        onChange={(e) => setFormQty(e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value) || 0))}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} htmlFor="f-capacity">容量</label>
+                      <input
+                        id="f-capacity"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="30"
+                        value={formCapacity}
+                        onChange={(e) => setFormCapacity(e.target.value)}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} htmlFor="f-unit">單位</label>
+                      <select
+                        id="f-unit"
+                        value={showNewUnitInput ? 'new' : (formCapacityUnit === '' || capacityUnits.includes(formCapacityUnit) ? formCapacityUnit : 'new')}
+                        onChange={(e) => {
+                          if (e.target.value === 'new') {
+                            setShowNewUnitInput(true);
+                          } else {
+                            setShowNewUnitInput(false);
+                            setFormCapacityUnit(e.target.value);
+                          }
+                        }}
+                        className={inputClass}
+                      >
+                        <option value="">—</option>
+                        {capacityUnits.map(u => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                        <option value="new">新增單位…</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {showNewUnitInput && (
+                    <div className="flex items-center gap-2 animate-fade-in">
                       <input
                         type="text"
                         autoFocus
                         value={newUnitName}
                         onChange={(e) => setNewUnitName(e.target.value)}
-                        className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                        placeholder="新單位..."
+                        className={inputClass}
+                        placeholder="新單位，例如 入"
+                        aria-label="新單位名稱"
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' && newUnitName.trim()) {
+                          if (e.key === 'Enter') {
                             e.preventDefault();
                             const val = newUnitName.trim();
+                            if (!val) return;
                             if (!capacityUnits.includes(val)) {
                               setCapacityUnits([...capacityUnits, val]);
                             }
@@ -2656,585 +2145,423 @@ ${categoryOptions}
                           setShowNewUnitInput(false);
                           setNewUnitName('');
                         }}
-                        className="p-2.5 bg-retro-primary text-white rounded-xl hover:bg-retro-primary/90 transition-colors"
+                        className="h-11 px-4 flex-shrink-0 bg-retro-primary text-white rounded-xl text-sm font-bold hover:brightness-105 transition-all"
                       >
-                        <Check className="w-4 h-4" />
+                        加入
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           setShowNewUnitInput(false);
                           setNewUnitName('');
-                          if (formCapacityUnit === 'new') setFormCapacityUnit(capacityUnits[0] || 'ml');
                         }}
-                        className="p-2.5 bg-stone-200 text-stone-600 rounded-xl hover:bg-stone-300 transition-colors"
+                        className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl text-retro-text/50 hover:bg-retro-bg transition-colors"
+                        aria-label="取消新增單位"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
-                  ) : (
-                    <select
-                      value={capacityUnits.includes(formCapacityUnit) ? formCapacityUnit : 'new'}
-                      onChange={(e) => {
-                        if (e.target.value === 'new') {
-                          setShowNewUnitInput(true);
-                        } else {
-                          setFormCapacityUnit(e.target.value);
-                        }
-                      }}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                    >
-                      {capacityUnits.map(u => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                      <option value="new">➕ 新增單位...</option>
-                    </select>
                   )}
-                </div>
-              </div>
 
-              {/* Usage */}
-              <div>
-                <label className="block text-xs font-bold text-retro-text/75 mb-1">使用狀態</label>
-                <select 
-                  value={formUsage}
-                  onChange={(e) => setFormUsage(e.target.value as any)}
-                  className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                >
-                  <option value="使用中">使用中</option>
-                  <option value="未開封">未開封</option>
-                  <option value="已用完">已用完</option>
-                  <option value="已丟棄">已丟棄</option>
-                </select>
-              </div>
-
-              {/* Requirement 3: Period After Opening (PAO) & Opening Date fields */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* 開封日期 (只有 未開封 不顯示) */}
-                {formUsage !== '未開封' && (
+                  {/* Usage */}
                   <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1 flex items-center gap-1 text-retro-secondary">
-                      <Calendar className="w-3.5 h-3.5" />
-                      開封日期
-                    </label>
-                    <input 
-                      type="date" 
-                      value={formOpenedDate}
-                      onChange={(e) => setFormOpenedDate(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                    />
+                    <span className={labelClass}>狀態</span>
+                    <div
+                      className={`grid ${editingInstanceId ? 'grid-cols-4' : 'grid-cols-2'} gap-1 p-1 bg-retro-bg/70 rounded-xl`}
+                      role="radiogroup"
+                      aria-label="狀態"
+                    >
+                      {(editingInstanceId
+                        ? (['未開封', '使用中', '已用完', '已丟棄'] as const)
+                        : (['未開封', '使用中'] as const)
+                      ).map(option => (
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={formUsage === option}
+                          onClick={() => setFormUsage(option)}
+                          className={`h-9 rounded-lg text-sm font-bold transition-colors ${formUsage === option ? 'bg-white text-retro-text shadow-sm' : 'text-retro-text/45 hover:text-retro-text/70'}`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                )}
-                
-                {/* 結束日期 (只有 已用完/已丟棄 顯示) */}
-                {(formUsage === '已用完' || formUsage === '已丟棄') && (
-                  <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1 flex items-center gap-1 text-retro-secondary">
-                      <Calendar className="w-3.5 h-3.5" />
-                      結束日期
-                    </label>
-                    <input 
-                      type="date" 
-                      value={formFinishedDate}
-                      onChange={(e) => setFormFinishedDate(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                    />
-                  </div>
-                )}
 
-                {/* PAO (未開封 或 使用中 顯示) */}
-                {(formUsage === '使用中' || formUsage === '未開封') && (
-                  <div className={formUsage === '未開封' ? 'col-span-2' : ''}>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1 flex items-center gap-1 text-retro-secondary">
-                      <ClockIcon className="w-3.5 h-3.5" />
-                      開封後可使用月數
-                    </label>
-                    <input 
-                      type="number" 
-                      min="1"
-                      placeholder="例如: 6, 12, 24"
-                      value={formPaoMonths}
-                      onChange={(e) => setFormPaoMonths(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                    />
+                  {/* Dates */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className={formUsage === '未開封' ? 'col-span-2' : ''}>
+                      <label className={labelClass} htmlFor="f-expiry">有效期限</label>
+                      <input
+                        id="f-expiry"
+                        type="date"
+                        value={formExpiry}
+                        onChange={(e) => setFormExpiry(e.target.value)}
+                        className={inputClass}
+                      />
+                    </div>
+                    {formUsage !== '未開封' && (
+                      <div>
+                        <label className={labelClass} htmlFor="f-opened">開封日期</label>
+                        <input
+                          id="f-opened"
+                          type="date"
+                          value={formOpenedDate}
+                          onChange={(e) => setFormOpenedDate(e.target.value)}
+                          className={inputClass}
+                        />
+                      </div>
+                    )}
+                    {(formUsage === '已用完' || formUsage === '已丟棄') && (
+                      <div className="col-span-2">
+                        <label className={labelClass} htmlFor="f-finished">{formUsage === '已丟棄' ? '丟棄日期' : '用完日期'}</label>
+                        <input
+                          id="f-finished"
+                          type="date"
+                          value={formFinishedDate}
+                          onChange={(e) => setFormFinishedDate(e.target.value)}
+                          className={inputClass}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Expiration Date */}
-              <div>
-                <label className="block text-xs font-bold text-retro-text/75 mb-1">有效期限 (到期日)</label>
-                <input 
-                  type="date" 
-                  value={formExpiry}
-                  onChange={(e) => setFormExpiry(e.target.value)}
-                  className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-sm text-retro-text focus:outline-none focus:border-retro-primary font-semibold"
-                />
-              </div>
-
-              {/* Purchase Records Fields (Requirement 1 - purchase details inputs) */}
-              <div className="space-y-3">
-                <span className="text-xs font-extrabold text-retro-primary/80 uppercase tracking-wider block">
-                  🛒 購買與價格紀錄 (選填)
-                </span>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1">購買日期</label>
-                    <input 
-                      type="date" 
-                      value={formPurchaseDate}
-                      onChange={(e) => setFormPurchaseDate(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-xs text-retro-text focus:outline-none focus:border-retro-primary font-semibold"
-                    />
+                  {/* PAO & purchase details */}
+                  <div className="rounded-2xl border border-retro-text/10 bg-white/40">
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreFields(open => !open)}
+                      aria-expanded={showMoreFields}
+                      className="w-full flex items-center gap-2 px-4 h-11 text-left text-sm font-bold text-retro-text/70"
+                    >
+                      <span className="flex-shrink-0">開封期限與購買資訊</span>
+                      {!showMoreFields && (
+                        <span className="flex-1 min-w-0 truncate text-right text-xs font-semibold text-retro-text/40">
+                          {[
+                            formPaoMonths ? `${formPaoMonths} 個月` : '',
+                            formPurchasePlace.trim(),
+                            formPrice ? `$${formPrice}` : ''
+                          ].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                      <ChevronDown className={`w-4 h-4 flex-shrink-0 ml-auto transition-transform ${showMoreFields ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showMoreFields && (
+                      <div className="px-4 pb-4 space-y-3 animate-fade-in">
+                        {(formUsage === '使用中' || formUsage === '未開封') && (
+                          <div>
+                            <label className={labelClass} htmlFor="f-pao">開封後可用（月）</label>
+                            <input
+                              id="f-pao"
+                              type="number"
+                              inputMode="numeric"
+                              min="1"
+                              placeholder="6、12、24"
+                              value={formPaoMonths}
+                              onChange={(e) => setFormPaoMonths(e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={labelClass} htmlFor="f-purchase-date">購買日期</label>
+                            <input
+                              id="f-purchase-date"
+                              type="date"
+                              value={formPurchaseDate}
+                              onChange={(e) => setFormPurchaseDate(e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass} htmlFor="f-price">單價</label>
+                            <input
+                              id="f-price"
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              placeholder="NT$"
+                              value={formPrice}
+                              onChange={(e) => setFormPrice(e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className={labelClass} htmlFor="f-place">購買地點</label>
+                          <input
+                            id="f-place"
+                            type="text"
+                            placeholder="屈臣氏、momo…"
+                            value={formPurchasePlace}
+                            onChange={(e) => setFormPurchasePlace(e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-retro-text/75 mb-1">單價 (NTD)</label>
-                    <input 
-                      type="number" 
-                      min="0"
-                      placeholder="例如: 350"
-                      value={formPrice}
-                      onChange={(e) => setFormPrice(e.target.value)}
-                      className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-xs text-retro-text focus:outline-none focus:border-retro-primary font-semibold"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-retro-text/75 mb-1">購買地點 / 管道</label>
-                  <input 
-                    type="text" 
-                    placeholder="例如: 屈臣氏、MOMO、日本代購..."
-                    value={formPurchasePlace}
-                    onChange={(e) => setFormPurchasePlace(e.target.value)}
-                    className="w-full p-2.5 bg-white/50 border border-retro-text/10 rounded-xl text-xs text-retro-text focus:outline-none focus:border-retro-primary font-semibold"
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
                 </div>
               )}
+              </div>
 
-              <div className="space-y-2 pt-2">
-                <button 
-                  type="submit"
-                  disabled={isUploading}
-                  className="w-full py-3 bg-retro-secondary text-retro-card font-bold text-sm rounded-xl hover:brightness-105 active:scale-[0.99] transition-all shadow cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isUploading
-                    ? '圖片上傳中，請稍候…'
-                    : isEditingMaster
-                      ? '儲存大品項修改'
-                      : editingInstanceId
-                        ? '儲存修改'
-                        : isAddingInstanceToExisting
-                          ? '新增規格明細'
-                          : '確認無誤，新增至資料庫'}
-                </button>
-
-                {editingInstanceId && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button 
-                      type="button"
-                      onClick={handleSaveAsNewInstance}
-                      className="py-2.5 bg-retro-primary text-retro-card font-bold text-xs rounded-xl hover:brightness-105 transition-all cursor-pointer"
-                      title="保留原明細，以此內容建立一個同商品的新明細項"
-                    >
-                      另存為新明細 (同品項)
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={handleDeleteInstance}
-                      className="py-2.5 bg-red-500 text-white font-bold text-xs rounded-xl hover:bg-red-600 transition-all cursor-pointer"
-                    >
-                      永久刪除此明細
-                    </button>
-                  </div>
-                )}
-
-                {isEditingMaster && (
-                  <button 
+              <div className="flex items-center gap-2 px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-retro-text/5">
+                {(editingInstanceId || isEditingMaster) && (
+                  <button
                     type="button"
-                    onClick={() => {
-                      if (editingProductId) {
-                        askConfirmation(
-                          '刪除大品項',
-                          '確定要永久刪除此大品項及其所有購買明細嗎？此操作無法復原。',
-                          () => {
-                            const removedProduct = products.find(product => product.id === editingProductId);
-                            const remainingProducts = products.filter(product => product.id !== editingProductId);
-                            setProducts(remainingProducts);
-                            queueProductPhotoCleanup(removedProduct?.photo);
-                            setShowAddForm(false);
-                            setSelectedDetailProduct(null);
-                            clearForm();
-                            showToast('大品項已成功刪除！');
-                          }
-                        );
-                      }
-                    }}
-                    className="w-full py-2.5 bg-red-500 text-white font-bold text-xs rounded-xl hover:bg-red-600 transition-all cursor-pointer mt-2"
+                    onClick={isEditingMaster ? handleDeleteProduct : handleDeleteInstance}
+                    className="h-12 px-4 flex-shrink-0 rounded-xl text-sm font-bold text-retro-danger hover:bg-retro-danger/10 transition-colors flex items-center gap-1.5"
                   >
-                    永久刪除此大品項 (含所有明細)
+                    <Trash2 className="w-4 h-4" />
+                    {isEditingMaster ? '刪除品項' : '刪除'}
                   </button>
                 )}
+                <button
+                  type="submit"
+                  disabled={isUploading}
+                  className="flex-1 h-12 bg-retro-secondary text-retro-card font-bold text-sm rounded-xl hover:brightness-105 active:scale-[0.99] transition-all shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isUploading
+                    ? '照片上傳中…'
+                    : isEditingMaster || editingInstanceId
+                      ? '儲存'
+                      : isAddingInstanceToExisting
+                        ? '加入'
+                        : '新增'}
+                </button>
               </div>
             </form>
-            </div>
           </div>
         )}
 
         {/* 6. Active Tab Product List / Settings Screen */}
         {currentTab === 'settings' ? (
           /* =================== SETTINGS VIEW =================== */
-          <div className="space-y-6 pb-20">
+          <div className="pb-20">
             {settingsView === 'menu' && (
-              <div className="space-y-4 animate-fade-in">
-                <h2 className="text-xl font-bold font-display flex items-center gap-2 text-retro-text mb-4">
-                  <Settings className="w-5 h-5 text-retro-primary" />
-                  設定與分類管理
-                </h2>
-                <div className="grid grid-cols-1 gap-3">
-                  <button onClick={() => setSettingsView('apikey')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-retro-primary/10 flex items-center justify-center text-retro-primary">
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">設定 Gemini API 金鑰</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
+              <div className="space-y-3 animate-fade-in">
+                <h2 className="text-xl font-bold font-display text-retro-text px-1 mb-1">設定</h2>
+                <div className="bg-white rounded-2xl border border-retro-text/10 divide-y divide-retro-text/5 overflow-hidden">
+                  {([
+                    { view: 'category', label: '分類管理', icon: ListTree, count: categories.length },
+                    { view: 'units', label: '容量單位', icon: Ruler, count: capacityUnits.length },
+                    { view: 'history', label: '歷史紀錄', icon: Archive, count: archivedCount },
+                    { view: 'backup', label: '備份與還原', icon: DatabaseBackup, count: 0 },
+                  ] as const).map(item => (
+                    <button
+                      key={item.view}
+                      onClick={() => setSettingsView(item.view)}
+                      className="w-full flex items-center gap-3 px-4 h-14 text-left hover:bg-retro-bg/40 active:bg-retro-bg/60 transition-colors cursor-pointer"
+                    >
+                      <item.icon className="w-5 h-5 text-retro-primary" />
+                      <span className="flex-1 text-sm font-bold text-retro-text">{item.label}</span>
+                      {item.count > 0 && <span className="text-xs font-bold text-retro-text/35">{item.count}</span>}
+                      <ChevronRight className="w-4 h-4 text-retro-text/30" />
+                    </button>
+                  ))}
+                </div>
 
-                  <button onClick={() => setSettingsView('category')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-retro-secondary/10 flex items-center justify-center text-retro-secondary">
-                        <ListTree className="w-5 h-5" />
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">設定與管理分類</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
-                  <button onClick={() => setSettingsView('units')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V4h16v3"/><path d="M9 7v13"/><path d="M15 7v13"/><path d="M4 20h16"/></svg>
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">設定容量單位</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
-
-                  <button onClick={() => setSettingsView('history')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600">
-                        <Archive className="w-5 h-5" />
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">歷史封存紀錄</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
-
-                  <button onClick={() => setSettingsView('appearance')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-600">
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">外觀設定 (風格與字體)</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary transition-colors" />
-                  </button>
-
-
-                  <button onClick={() => setSettingsView('backup')} className="p-4 bg-white border border-retro-text/10 rounded-2xl shadow-sm hover:border-retro-primary/50 transition-all flex items-center justify-between group cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                      </div>
-                      <span className="font-bold text-retro-text text-sm">備份與還原 (可存至 Google Drive)</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-retro-text/30 group-hover:text-retro-primary group-hover:translate-x-1 transition-all" />
-                  </button>
-
-                  <div className="mt-2">
-                  <button onClick={async () => {
+                <button
+                  onClick={async () => {
                     clearMemoryImages(user.uid);
                     await clearPrivateUserCache(user.uid);
                     await logOut();
-                  }} className="w-full p-4 bg-red-50 border border-red-100 rounded-2xl shadow-sm hover:border-red-200 transition-all flex items-center justify-center group cursor-pointer">
-                      <span className="font-bold text-red-600 text-sm">登出帳號</span>
-                    </button>
-                  </div>
-                  
-                  <div className="mt-6 flex flex-col items-center justify-center gap-1.5 opacity-50">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold text-retro-text">用品管理系統</span>
-                      <span className="text-[9px] font-bold text-retro-text bg-retro-text/10 px-1.5 py-0.5 rounded uppercase">{APP_VERSION}</span>
-                    </div>
-                  </div>
-                </div>
+                  }}
+                  className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl bg-white border border-retro-text/10 text-sm font-bold text-retro-danger hover:bg-retro-danger/5 transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  登出
+                </button>
+
+                <p className="pt-4 text-center text-[11px] font-bold text-retro-text/30">用品管理系統 {APP_VERSION}</p>
               </div>
             )}
 
-            {settingsView === 'apikey' && (
-              <div className="space-y-4 animate-fade-in">
-                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
-                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
-                </button>
-                {/* Requirement 2: API KEY INPUT */}
-                <div className="p-5 bg-retro-card rounded-2xl border border-retro-text/10 shadow-sm space-y-3">
-              <h3 className="text-sm font-bold text-retro-secondary flex items-center gap-1.5">
-                <Sparkles className="w-4.5 h-4.5" />
-                Gemini AI 金鑰設定
-              </h3>
-              <p className="text-xs text-retro-text/60 leading-relaxed font-medium">
-                若要使用「自動網搜補全產品」或「相機拍照影像辨識」功能，請在此處設定您的 Gemini API Key。金鑰會安全保存在您的個人瀏覽器中。
-              </p>
-              <div className="space-y-2">
-                {[0, 1, 2].map(idx => (
-                  <div key={idx} className="relative flex-1">
-                    <input 
-                      type={showApiKey ? "text" : "password"}
-                      placeholder={`請輸入 GEMINI_API_KEY ${idx + 1}`}
-                      value={apiKeyInputs[idx]}
-                      onChange={(e) => {
-                        const newInputs = [...apiKeyInputs];
-                        newInputs[idx] = e.target.value;
-                        setApiKeyInputs(newInputs);
-                      }}
-                      className="w-full py-2 pl-3 pr-10 bg-white border border-retro-text/10 rounded-xl text-xs font-semibold text-retro-text focus:outline-none focus:border-retro-primary"
-                    />
-                    <button 
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-retro-text/50 hover:text-retro-text"
-                    >
-                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                ))}
-                <div className="flex justify-end pt-1">
-                  <button 
-                    onClick={handleSaveApiKey}
-                    className="px-4 py-2 bg-retro-primary text-retro-card text-xs font-bold rounded-xl hover:brightness-105 active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    儲存金鑰
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          )}
-
             {settingsView === 'category' && (
               <div className="space-y-4 animate-fade-in">
-                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
-                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
-                </button>
-                {/* Requirement 1: EDIT CATEGORY & SUBCATEGORY NESTED LIST */}
-                <div className="p-5 bg-retro-card rounded-2xl border border-retro-text/10 shadow-sm space-y-4">
-                  <div className="flex justify-between items-center">
-                <h3 className="text-sm font-bold text-retro-secondary flex items-center gap-1.5">
-                  <ListTree className="w-4.5 h-4.5" />
-                  大分類與小分類管理
-                </h3>
-              </div>
-              <p className="text-xs text-retro-text/60 leading-relaxed font-medium">
-                可任意新增、編輯、刪減與<b>拖曳排序</b>大分類與小分類。點擊分類卡片旁的<b>「管理小分類」</b>即可編輯、新增、刪除及拖曳該小分類的細項！
-              </p>
+                {renderSettingsHeader('分類管理')}
 
-              {/* Add New Category */}
-              <div className="p-3.5 bg-retro-bg/40 rounded-xl border border-retro-text/5 space-y-3">
-                <div className="font-bold text-xs text-retro-text/70">新增大分類</div>
-                <div className="flex flex-wrap gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="新分類名稱 (例: 隱形眼鏡)"
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                    className="flex-1 min-w-[140px] p-2 bg-white border border-retro-text/10 rounded-xl text-xs text-retro-text focus:outline-none focus:border-retro-primary font-medium"
-                  />
-                  <select 
-                    value={newCatIcon}
-                    onChange={(e) => setNewCatIcon(e.target.value)}
-                    className="p-2 bg-white border border-retro-text/10 rounded-xl text-xs font-semibold text-retro-text focus:outline-none"
-                  >
-                    <option value="sparkles">✨ 閃亮</option>
-                    <option value="droplets">💧 水滴</option>
-                    <option value="pill">💊 膠囊</option>
-                    <option value="package">📦 盒子</option>
-                    <option value="shopping-bag">🛍️ 購物袋</option>
-                    <option value="heart">❤️ 愛心</option>
-                    <option value="star">⭐ 星星</option>
-                  </select>
-                  <button 
-                    onClick={handleAddCategory}
-                    className="px-3 py-2 bg-retro-secondary text-retro-card text-xs font-bold rounded-xl hover:opacity-90 transition-all flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    新增大分類
-                  </button>
+                {/* Add New Category */}
+                <div className="p-3 bg-white rounded-2xl border border-retro-text/10 space-y-3">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="新的大分類"
+                      aria-label="新的大分類名稱"
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddCategory();
+                      }}
+                      className={`${inputClass} flex-1`}
+                    />
+                    <button
+                      onClick={handleAddCategory}
+                      className="h-11 px-4 flex-shrink-0 bg-retro-secondary text-retro-card text-sm font-bold rounded-xl hover:brightness-105 transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      新增
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="分類圖示">
+                    {CATEGORY_ICON_OPTIONS.map(icon => (
+                      <button
+                        key={icon}
+                        role="radio"
+                        aria-checked={newCatIcon === icon}
+                        aria-label={CATEGORY_ICON_LABELS[icon]}
+                        onClick={() => setNewCatIcon(icon)}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${newCatIcon === icon ? 'bg-retro-primary text-retro-card' : 'bg-retro-bg/60 text-retro-text/45 hover:text-retro-text/70'}`}
+                      >
+                        <CategoryIcon name={icon} className="w-4.5 h-4.5" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Main Categories Nested Reordering List */}
-              <div className="space-y-3">
-                <div className="text-xs font-bold text-retro-text/60">大分類清單 (拖曳手把排序)</div>
+                {/* Category list */}
                 <div className="space-y-2.5">
                   {categories.map((cat, idx) => (
-                    <div 
-                      key={cat.id} 
-                      className="border border-retro-text/10 rounded-xl bg-white overflow-hidden shadow-sm transition-all"
+                    <div
+                      key={cat.id}
+                      className="border border-retro-text/10 rounded-2xl bg-white overflow-hidden"
                     >
-                      {/* Big Category Bar */}
-                      <div 
+                      <div
                         draggable
                         onDragStart={(e) => handleCatDragStart(e, idx)}
                         onDragOver={handleCatDragOver}
                         onDrop={(e) => handleCatDrop(e, idx)}
-                        className="flex items-center justify-between p-3 bg-stone-50 border-b border-stone-100 hover:bg-stone-100 transition-colors"
+                        className="flex items-center gap-2 pl-2 pr-2 py-2"
                       >
-                        <div className="flex items-center gap-2">
-                          <div className="cursor-grab p-1 hover:bg-stone-200 rounded text-stone-400 active:text-stone-700 hidden sm:block">
-                            <GripVertical className="w-4 h-4" />
-                          </div>
-                          <div className="flex flex-col sm:hidden">
-                            <button onClick={(e) => { e.stopPropagation(); moveCatUp(idx); }} disabled={idx === 0} className="p-0.5 text-stone-400 hover:bg-stone-200 rounded disabled:opacity-30">
-                              <ChevronUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); moveCatDown(idx); }} disabled={idx === categories.length - 1} className="p-0.5 text-stone-400 hover:bg-stone-200 rounded disabled:opacity-30">
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <span className="text-sm">
-                            <CategoryIcon name={cat.icon} className="w-4.5 h-4.5 text-retro-primary" />
-                          </span>
-                          <span className="font-bold text-sm text-retro-text">{cat.name}</span>
+                        <div className="cursor-grab w-8 h-8 items-center justify-center rounded-lg text-retro-text/30 hover:bg-retro-bg/60 hidden sm:flex">
+                          <GripVertical className="w-4 h-4" />
                         </div>
-                        
-                        <div className="flex items-center gap-1.5">
-                          <button 
-                            onClick={() => setActiveCategoryForSub(activeCategoryForSub === cat.id ? null : cat.id)}
-                            className="text-[11px] font-bold px-2.5 py-1.5 bg-retro-primary/10 text-retro-primary rounded-lg hover:bg-retro-primary/20 transition-colors flex items-center gap-1"
-                          >
-                            <ListTree className="w-3.5 h-3.5" />
-                            管理小分類 ({cat.subcategories.length})
+                        <div className="flex flex-col sm:hidden">
+                          <button onClick={(e) => { e.stopPropagation(); moveCatUp(idx); }} disabled={idx === 0} className="w-8 h-6 flex items-center justify-center text-retro-text/40 rounded-md hover:bg-retro-bg/60 disabled:opacity-25" aria-label={`把「${cat.name}」往上移`}>
+                            <ChevronUp className="w-4 h-4" />
                           </button>
-                          {categories.length > 1 && (
-                            <button 
-                              onClick={() => handleDeleteCategory(cat.id)} 
-                              className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                              title="刪除此大分類"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
+                          <button onClick={(e) => { e.stopPropagation(); moveCatDown(idx); }} disabled={idx === categories.length - 1} className="w-8 h-6 flex items-center justify-center text-retro-text/40 rounded-md hover:bg-retro-bg/60 disabled:opacity-25" aria-label={`把「${cat.name}」往下移`}>
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
                         </div>
+                        <CategoryIcon name={cat.icon} className="w-4.5 h-4.5 text-retro-primary flex-shrink-0" />
+                        <span className="flex-1 min-w-0 truncate font-bold text-sm text-retro-text">{cat.name}</span>
+                        <button
+                          onClick={() => setActiveCategoryForSub(activeCategoryForSub === cat.id ? null : cat.id)}
+                          aria-expanded={activeCategoryForSub === cat.id}
+                          className={`h-9 px-3 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 ${activeCategoryForSub === cat.id ? 'bg-retro-primary text-retro-card' : 'bg-retro-primary/10 text-retro-primary hover:bg-retro-primary/20'}`}
+                        >
+                          小分類 {cat.subcategories.length}
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${activeCategoryForSub === cat.id ? 'rotate-180' : ''}`} />
+                        </button>
+                        {categories.length > 1 && (
+                          <button
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="w-9 h-9 flex items-center justify-center rounded-xl text-retro-text/30 hover:text-retro-danger hover:bg-retro-danger/10 transition-colors"
+                            aria-label={`刪除「${cat.name}」`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
 
-                      {/* Small Categories Sub-list (Requirement 1) */}
+                      {/* Subcategories */}
                       {activeCategoryForSub === cat.id && (
-                        <div className="p-3 bg-stone-50 border-t border-stone-100/60 space-y-3">
-                          <div className="flex justify-between items-center">
-                            <div className="text-[11px] font-bold text-retro-secondary flex items-center gap-1">
-                              <span>【{cat.name}】的小分類管理</span>
-                            </div>
-                          </div>
-
-                          {/* Add Subcategory Inline */}
+                        <div className="p-3 bg-retro-bg/30 border-t border-retro-text/5 space-y-2.5 animate-fade-in">
                           <div className="flex gap-2">
-                            <input 
-                              type="text" 
-                              placeholder="新小分類名稱 (如: 護底霜)"
+                            <input
+                              type="text"
+                              placeholder="新的小分類"
+                              aria-label="新的小分類名稱"
                               value={newSubName}
                               onChange={(e) => setNewSubName(e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') handleAddSubcategory(cat.id);
                               }}
-                              className="flex-1 p-2 bg-white border border-stone-200 rounded-lg text-xs text-retro-text focus:outline-none focus:border-retro-primary"
+                              className={`${inputClass} flex-1 bg-white`}
                             />
-                            <button 
+                            <button
                               onClick={() => handleAddSubcategory(cat.id)}
-                              className="px-3 bg-stone-700 hover:bg-stone-800 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center cursor-pointer"
+                              className="w-11 h-11 flex-shrink-0 bg-retro-primary text-white rounded-xl flex items-center justify-center hover:brightness-105 transition-all cursor-pointer"
+                              aria-label="新增小分類"
                             >
-                              <Plus className="w-3.5 h-3.5" />
+                              <Plus className="w-4 h-4" />
                             </button>
                           </div>
 
-                          {/* Subcategory draggable list */}
-                          <ul className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          <ul className="space-y-1.5 max-h-72 overflow-y-auto">
                             {cat.subcategories.map((sub, sIdx) => (
-                              <li 
+                              <li
                                 key={sIdx}
                                 draggable
                                 onDragStart={(e) => handleSubDragStart(e, cat.id, sIdx)}
                                 onDragOver={handleSubDragOver}
                                 onDrop={(e) => handleSubDrop(e, cat.id, sIdx)}
-                                className="flex items-center justify-between p-2 bg-white border border-stone-200 rounded-lg text-xs hover:bg-stone-50 transition-colors"
+                                className="flex items-center gap-1.5 pl-1.5 pr-1 py-1 bg-white border border-retro-text/5 rounded-xl text-sm"
                               >
-                                <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                                  <div className="cursor-grab p-0.5 text-stone-400 hover:text-stone-600 hidden sm:block">
-                                    <GripVertical className="w-3.5 h-3.5" />
-                                  </div>
-                                  <div className="flex flex-col sm:hidden">
-                                    <button onClick={(e) => { e.stopPropagation(); moveSubCatUp(cat.id, sIdx); }} disabled={sIdx === 0} className="p-0.5 text-stone-400 hover:bg-stone-200 rounded disabled:opacity-30">
-                                      <ChevronUp className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button onClick={(e) => { e.stopPropagation(); moveSubCatDown(cat.id, sIdx); }} disabled={sIdx === cat.subcategories.length - 1} className="p-0.5 text-stone-400 hover:bg-stone-200 rounded disabled:opacity-30">
-                                      <ChevronDown className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                  {editingSubIdx === sIdx && editingSubCatId === cat.id ? (
-                                    <input 
-                                      type="text" 
-                                      value={editingSubName}
-                                      onChange={(e) => setEditingSubName(e.target.value)}
-                                      onBlur={() => handleSaveSubcategory(cat.id, sIdx)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleSaveSubcategory(cat.id, sIdx);
-                                      }}
-                                      autoFocus
-                                      className="flex-1 p-1 py-0.5 border border-stone-400 rounded bg-white text-xs text-stone-800 focus:outline-none"
-                                    />
-                                  ) : (
-                                    <span className="truncate font-semibold text-stone-700">{sub}</span>
-                                  )}
+                                <div className="cursor-grab w-7 h-8 items-center justify-center text-retro-text/30 hidden sm:flex">
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                  {editingSubIdx === sIdx && editingSubCatId === cat.id ? (
-                                    <button 
-                                      onClick={() => handleSaveSubcategory(cat.id, sIdx)}
-                                      className="text-stone-700 hover:text-stone-900 p-0.5"
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                    </button>
-                                  ) : (
-                                    <button 
-                                      onClick={() => {
-                                        setEditingSubCatId(cat.id);
-                                        setEditingSubIdx(sIdx);
-                                        setEditingSubName(sub);
-                                      }}
-                                      className="text-stone-400 hover:text-stone-700 p-0.5"
-                                      title="編輯小分類名稱"
-                                    >
-                                      <Edit3 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                  <button 
-                                    onClick={() => handleDeleteSubcategory(cat.id, sIdx)}
-                                    className="text-red-400 hover:text-red-600 p-0.5"
-                                    title="刪除小分類"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                <div className="flex flex-col sm:hidden">
+                                  <button onClick={(e) => { e.stopPropagation(); moveSubCatUp(cat.id, sIdx); }} disabled={sIdx === 0} className="w-8 h-5 flex items-center justify-center text-retro-text/40 rounded disabled:opacity-25" aria-label={`把「${sub}」往上移`}>
+                                    <ChevronUp className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); moveSubCatDown(cat.id, sIdx); }} disabled={sIdx === cat.subcategories.length - 1} className="w-8 h-5 flex items-center justify-center text-retro-text/40 rounded disabled:opacity-25" aria-label={`把「${sub}」往下移`}>
+                                    <ChevronDown className="w-4 h-4" />
                                   </button>
                                 </div>
+                                {editingSubIdx === sIdx && editingSubCatId === cat.id ? (
+                                  <input
+                                    type="text"
+                                    value={editingSubName}
+                                    onChange={(e) => setEditingSubName(e.target.value)}
+                                    onBlur={() => handleSaveSubcategory(cat.id, sIdx)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveSubcategory(cat.id, sIdx);
+                                    }}
+                                    autoFocus
+                                    aria-label="小分類名稱"
+                                    className="flex-1 min-w-0 h-9 px-2 border border-retro-primary rounded-lg bg-white text-sm text-retro-text focus:outline-none"
+                                  />
+                                ) : (
+                                  <span className="flex-1 min-w-0 truncate font-semibold text-retro-text/80">{sub}</span>
+                                )}
+                                {editingSubIdx === sIdx && editingSubCatId === cat.id ? (
+                                  <button
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => handleSaveSubcategory(cat.id, sIdx)}
+                                    className="w-9 h-9 flex items-center justify-center rounded-lg text-retro-primary hover:bg-retro-primary/10"
+                                    aria-label="儲存名稱"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setEditingSubCatId(cat.id);
+                                      setEditingSubIdx(sIdx);
+                                      setEditingSubName(sub);
+                                    }}
+                                    className="w-9 h-9 flex items-center justify-center rounded-lg text-retro-text/35 hover:text-retro-text hover:bg-retro-bg/60"
+                                    aria-label={`重新命名「${sub}」`}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteSubcategory(cat.id, sIdx)}
+                                  className="w-9 h-9 flex items-center justify-center rounded-lg text-retro-text/30 hover:text-retro-danger hover:bg-retro-danger/10"
+                                  aria-label={`刪除「${sub}」`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                               </li>
                             ))}
                             {cat.subcategories.length === 0 && (
-                              <li className="text-center text-stone-400 text-[10px] py-4 bg-white border border-stone-100 rounded-lg">
-                                尚無小分類，請在上方新增
+                              <li className="text-center text-retro-text/35 text-xs font-semibold py-4">
+                                還沒有小分類
                               </li>
                             )}
                           </ul>
@@ -3244,221 +2571,116 @@ ${categoryOptions}
                   ))}
                 </div>
               </div>
-            </div>
-            </div>
             )}
 
-            
             {settingsView === 'backup' && (
               <div className="space-y-4 animate-fade-in">
-                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
-                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
-                </button>
-                <div className="p-5 bg-retro-card rounded-2xl border border-retro-text/10 shadow-sm space-y-4">
-                  <h3 className="text-sm font-bold text-retro-secondary flex items-center gap-1.5">
-                    資料備份與還原
-                  </h3>
-                  <p className="text-xs text-retro-text/70 leading-relaxed">
-                    您可以將所有資料下載成 JSON 備份檔，並將其上傳至您的 Google Drive 保存。未來若需要還原，只要點擊「還原資料」並選擇該備份檔即可。
-                  </p>
-                  
-                  <div className="flex flex-col gap-3 pt-2">
-                    <button 
-                      onClick={handleExportBackup}
-                      className="w-full flex items-center justify-center gap-2 bg-retro-primary text-white py-3 rounded-xl font-bold hover:bg-retro-primary/90 transition-all"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                      下載備份檔
-                    </button>
-                    
-                    <button 
-                      onClick={() => document.getElementById('backupFileInput')?.click()}
-                      className="w-full flex items-center justify-center gap-2 bg-white border border-retro-primary text-retro-primary py-3 rounded-xl font-bold hover:bg-retro-primary/5 transition-all cursor-pointer"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                      從備份檔還原
-                    </button>
-                    <input id="backupFileInput" type="file" accept=".json,.txt,application/json,text/plain" className="hidden" onChange={handleImportBackup} />
-                  </div>
+                {renderSettingsHeader('備份與還原')}
+                <div className="space-y-2.5">
+                  <button
+                    onClick={handleExportBackup}
+                    className="w-full h-14 flex items-center gap-3 px-4 bg-white border border-retro-text/10 rounded-2xl text-left hover:bg-retro-bg/40 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-5 h-5 text-retro-primary" />
+                    <span className="flex-1 text-sm font-bold text-retro-text">下載備份檔</span>
+                  </button>
+                  <button
+                    onClick={() => backupInputRef.current?.click()}
+                    className="w-full h-14 flex items-center gap-3 px-4 bg-white border border-retro-text/10 rounded-2xl text-left hover:bg-retro-bg/40 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-5 h-5 text-retro-secondary" />
+                    <span className="flex-1 text-sm font-bold text-retro-text">從備份檔還原</span>
+                  </button>
+                  <input ref={backupInputRef} type="file" accept=".json,.txt,application/json,text/plain" className="hidden" onChange={handleImportBackup} />
                 </div>
               </div>
             )}
 
-            
-            {settingsView === 'appearance' && (
-              <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex justify-end p-0 animate-fade-in">
-                <div className="w-full sm:w-96 bg-stone-50 h-full shadow-2xl flex flex-col animate-slide-in-right pb-safe">
-                  <div className="p-4 flex items-center gap-3 border-b border-retro-text/10 bg-white">
-                    <button onClick={() => setSettingsView('menu')} className="w-10 h-10 flex flex-col items-center justify-center rounded-xl bg-stone-100 text-retro-text hover:bg-stone-200 transition-colors cursor-pointer">
-                      <ArrowLeft className="w-5 h-5" />
-                    </button>
-                    <h2 className="text-lg font-bold font-display text-retro-text flex-1">外觀設定</h2>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                    <div className="flex flex-col gap-4">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-retro-primary" />
-                        <h3 className="font-bold text-retro-text text-sm">視覺風格設定</h3>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleThemeChange('retro')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'retro' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >復古風</button>
-                        <button 
-                          onClick={() => handleThemeChange('pixel')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'pixel' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >像素風</button>
-                        <button 
-                          onClick={() => handleThemeChange('minimal')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appTheme === 'minimal' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >夜森林</button>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                      <div className="flex items-center gap-2">
-                        <Type className="w-5 h-5 text-retro-primary" />
-                        <h3 className="font-bold text-retro-text text-sm">字體大小設定</h3>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleFontSizeChange('small')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'small' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >小</button>
-                        <button 
-                          onClick={() => handleFontSizeChange('medium')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'medium' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >中</button>
-                        <button 
-                          onClick={() => handleFontSizeChange('large')}
-                          className={`flex-1 py-2.5 text-sm font-bold rounded-xl border transition-all cursor-pointer ${appFontSize === 'large' ? 'border-retro-primary bg-retro-primary/10 text-retro-primary shadow-sm' : 'border-retro-text/10 bg-white text-retro-text/50 hover:text-retro-text hover:border-retro-text/20'}`}
-                        >大</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-                        {settingsView === 'units' && (
+            {settingsView === 'units' && (
               <div className="space-y-4 animate-fade-in">
-                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
-                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
-                </button>
-                <div className="p-5 bg-retro-card rounded-2xl border border-retro-text/10 shadow-sm space-y-4">
-                  <h3 className="text-sm font-bold text-retro-secondary flex items-center gap-1.5">
-                    容量單位管理
-                  </h3>
-                  <p className="text-xs text-retro-text/60 leading-relaxed font-medium">
-                    在這裡新增或刪除您需要的商品容量單位（如 ml, g, 顆 等）。輸入商品時也可直接新增。
-                  </p>
-                  
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={settingsUnitName}
-                      onChange={(e) => setSettingsUnitName(e.target.value)}
-                      placeholder="輸入新單位..."
-                      className="flex-1 p-2.5 bg-white border border-retro-text/10 rounded-xl text-sm focus:outline-none focus:border-retro-primary transition-colors"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && settingsUnitName.trim()) {
-                           const val = settingsUnitName.trim();
-                           if (!capacityUnits.includes(val)) {
-                             setCapacityUnits([...capacityUnits, val]);
-                           }
-                           setSettingsUnitName('');
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => {
+                {renderSettingsHeader('容量單位')}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={settingsUnitName}
+                    onChange={(e) => setSettingsUnitName(e.target.value)}
+                    placeholder="新的單位"
+                    aria-label="新的單位名稱"
+                    className={`${inputClass} flex-1 bg-white`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && settingsUnitName.trim()) {
                          const val = settingsUnitName.trim();
-                         if (val && !capacityUnits.includes(val)) {
+                         if (!capacityUnits.includes(val)) {
                            setCapacityUnits([...capacityUnits, val]);
                          }
                          setSettingsUnitName('');
-                      }}
-                      className="px-4 bg-retro-primary text-white rounded-xl text-sm font-bold hover:bg-retro-primary/90 transition-colors"
-                    >
-                      新增
-                    </button>
-                  </div>
-
-                  <ul className="flex flex-wrap gap-2 mt-4">
-                    {capacityUnits.map((u, idx) => (
-                      <li key={idx} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-retro-text/10 rounded-full text-xs font-bold text-retro-text shadow-sm">
-                        <span>{u}</span>
-                        <button 
-                          onClick={() => {
-                            askConfirmation('刪除單位', `確定要刪除單位「${u}」嗎？`, () => {
-                              setCapacityUnits(capacityUnits.filter(unit => unit !== u));
-                            });
-                          }}
-                          className="text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-full p-0.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </li>
-                    ))}
-                    {capacityUnits.length === 0 && (
-                      <li className="text-xs text-stone-400 w-full text-center py-4">目前沒有任何單位</li>
-                    )}
-                  </ul>
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                       const val = settingsUnitName.trim();
+                       if (val && !capacityUnits.includes(val)) {
+                         setCapacityUnits([...capacityUnits, val]);
+                       }
+                       setSettingsUnitName('');
+                    }}
+                    className="h-11 px-4 flex-shrink-0 bg-retro-primary text-white rounded-xl text-sm font-bold hover:brightness-105 transition-all flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    新增
+                  </button>
                 </div>
+
+                <ul className="flex flex-wrap gap-2">
+                  {capacityUnits.map((u, idx) => (
+                    <li key={idx} className="flex items-center gap-0.5 pl-3.5 pr-1 h-10 bg-white border border-retro-text/10 rounded-full text-sm font-bold text-retro-text">
+                      <span>{u}</span>
+                      <button
+                        onClick={() => {
+                          askConfirmation('刪除單位', `要刪除單位「${u}」嗎？已記錄的容量不受影響。`, () => {
+                            setCapacityUnits(capacityUnits.filter(unit => unit !== u));
+                          }, { confirmLabel: '刪除', danger: true });
+                        }}
+                        className="w-8 h-8 flex items-center justify-center rounded-full text-retro-text/30 hover:text-retro-danger hover:bg-retro-danger/10 transition-colors"
+                        aria-label={`刪除單位「${u}」`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                  {capacityUnits.length === 0 && (
+                    <li className="text-xs font-semibold text-retro-text/35 w-full text-center py-4">還沒有單位</li>
+                  )}
+                </ul>
               </div>
             )}
 
             {settingsView === 'history' && (
-              <div className="space-y-4 animate-fade-in">
-                <button onClick={() => setSettingsView('menu')} className="text-xs font-bold text-retro-text/50 hover:text-retro-primary flex items-center gap-1 transition-colors cursor-pointer mb-2">
-                  <ChevronDown className="w-4 h-4 rotate-90" /> 返回設定選單
-                </button>
-                <div className="mb-1 bg-retro-card/40 px-3.5 py-2.5 rounded-xl border border-retro-text/5 text-xs text-retro-text font-bold flex items-center justify-between">
-                  <span>歷史封存紀錄</span>
-                  <span className="text-retro-secondary bg-retro-secondary/10 px-2 py-0.5 rounded-full">
-                    {products.filter(p => p.status === 'archived').length} 件
-                  </span>
-                </div>
-                
+              <div className="space-y-3 animate-fade-in">
+                {renderSettingsHeader('歷史紀錄')}
                 {(() => {
-                  const archivedProducts = products.filter(p => p.status === 'archived' && (searchKeyword ? p.name.includes(searchKeyword) || p.brand.includes(searchKeyword) : true));
+                  const archivedProducts = products
+                    .filter(p => p.status === 'archived')
+                    .sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
                   if (archivedProducts.length === 0) {
                     return (
-                      <div className="text-center py-12 bg-retro-card rounded-2xl border border-retro-text/10">
-                        <p className="text-sm text-retro-text/50 font-medium">尚無符合的封存商品</p>
-                      </div>
+                      <p className="text-center py-12 text-sm font-semibold text-retro-text/40">還沒有歷史紀錄</p>
                     );
                   }
                   return (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       {archivedProducts.map(prod => (
-                        <div key={prod.id}>
-                          <ProductCard 
-                              userId={user.uid}
-                              onPreviewReady={handlePreviewReady}
-                              product={prod} 
-                              onViewDetail={() => {}}
-                              onEdit={handleEditInstanceTrigger}
-                              onArchive={handleArchiveInstance}
-                              onAddAnother={handleAddAnotherInstanceTrigger}
-                              onImageClick={setFullscreenImage}
-                              categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
-                              onRestoreMaster={handleRestoreMaster}
-                              onDeleteMaster={(product) => {
-                                askConfirmation(
-                                  '永久刪除紀錄',
-                                  `確定要從歷史封存中永久刪除「${product.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
-                                  () => {
-                                    const remainingProducts = products.filter(item => item.id !== product.id);
-                                    setProducts(remainingProducts);
-                                    queueProductPhotoCleanup(product.photo);
-                                    showToast('已永久刪除該紀錄');
-                                  }
-                                );
-                              }}
-                            />
-                        </div>
+                        <ProductCard
+                          key={prod.id}
+                          userId={user.uid}
+                          onPreviewReady={handlePreviewReady}
+                          product={prod}
+                          onImageClick={setFullscreenImage}
+                          categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
+                          onRestore={handleRestoreMaster}
+                          onDelete={handleDeleteArchivedProduct}
+                        />
                       ))}
                     </div>
                   );
@@ -3469,108 +2691,76 @@ ${categoryOptions}
         ) : (
           /* =================== MAIN LIST VIEW =================== */
           <div className="space-y-4">
-            {/* Category Stats Indicator */}
-            {!hasSearchFilter ? (
-              <div className="flex justify-between items-center mb-1 bg-retro-card/40 px-3.5 py-2.5 rounded-xl border border-retro-text/5 text-xs text-retro-text">
-                <span className="font-bold text-retro-text/80">
-                  分類：{categories.find(c => c.id === currentTab)?.name || ''}
-                </span>
-                <span className="font-semibold text-retro-text/70 flex items-center gap-1">
-                  <span>共 {getCategoryStats(currentTab).count} 品項</span>
-                  <span className="text-retro-text/30">|</span>
-                  <Package className="w-3.5 h-3.5 text-retro-primary" />
-                  <span>總庫存 {getCategoryStats(currentTab).qty}</span>
-                </span>
-              </div>
-            ) : (
-              <div className="flex justify-between items-center mb-1 bg-retro-card/40 px-3.5 py-2.5 rounded-xl border border-retro-text/5 text-xs text-retro-text">
-                <span className="font-bold text-retro-text/80">
-                  搜尋結果
-                </span>
-                <span className="font-semibold text-retro-text/70 flex items-center gap-1">
-                  <span>共 {activeProducts.length} 品項</span>
-                  <span className="text-retro-text/30">|</span>
-                  <Package className="w-3.5 h-3.5 text-retro-primary" />
-                  <span>總庫存 {activeProducts.reduce((sum, p) => sum + p.instances.reduce((s, i) => s + i.qty, 0), 0)}</span>
-                </span>
-              </div>
-            )}
-
-            {/* Subcategory Nested Product List */}
             {(() => {
-              // If searching, render flat list
+              const stats = hasSearchFilter
+                ? {
+                    count: activeProducts.length,
+                    qty: activeProducts.reduce((sum, p) => sum + p.instances.reduce((s, i) => s + (isActiveUsage(i.usage) ? i.qty : 0), 0), 0)
+                  }
+                : getCategoryStats(currentTab);
+              return (
+                <div className="flex items-center justify-between px-1 text-xs font-bold text-retro-text/45">
+                  <span>{hasSearchFilter ? '搜尋結果' : categories.find(c => c.id === currentTab)?.name || ''}</span>
+                  <span>{stats.count} 品項 · 庫存 {stats.qty}</span>
+                </div>
+              );
+            })()}
+
+            {(() => {
+              const inUseFirst = (a: Product, b: Product) => {
+                const aOpened = a.instances.some(i => i.usage === '使用中') ? 1 : 0;
+                const bOpened = b.instances.some(i => i.usage === '使用中') ? 1 : 0;
+                return bOpened - aOpened;
+              };
+              const renderCard = (prod: Product) => (
+                <ProductCard
+                  key={prod.id}
+                  userId={user.uid}
+                  onPreviewReady={handlePreviewReady}
+                  product={prod}
+                  onViewDetail={setSelectedDetailProduct}
+                  onImageClick={setFullscreenImage}
+                  categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
+                />
+              );
+
+              // Searching: one flat list
               if (hasSearchFilter) {
                 if (activeProducts.length === 0) {
                   return (
-                    <div className="text-center py-12 bg-retro-card rounded-2xl border border-retro-text/10">
-                      <p className="text-sm text-retro-text/50 font-semibold">尚無符合的商品</p>
-                    </div>
+                    <p className="text-center py-12 text-sm font-semibold text-retro-text/40">找不到符合的商品</p>
                   );
                 }
                 return (
-                  <div className="space-y-3">
-                    {[...activeProducts]
-      .sort((a, b) => {
-        const aOpened = a.instances.some(i => i.usage === '使用中') ? 1 : 0;
-        const bOpened = b.instances.some(i => i.usage === '使用中') ? 1 : 0;
-        return bOpened - aOpened;
-      })
-      .map(prod => (
-                      <div key={prod.id}>
-                        <ProductCard 
-                          userId={user.uid}
-                          onPreviewReady={handlePreviewReady}
-                          product={prod} 
-                          onViewDetail={setSelectedDetailProduct}
-                          onEdit={handleEditInstanceTrigger}
-                          onArchive={handleArchiveInstance}
-                          onAddAnother={handleAddAnotherInstanceTrigger}
-                          onImageClick={setFullscreenImage}
-                          categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
-                        />
-                      </div>
-                    ))}
+                  <div className="space-y-2.5">
+                    {[...activeProducts].sort(inUseFirst).map(renderCard)}
                   </div>
                 );
               }
 
-              // Get subcategories of current category
               const currentCatObj = categories.find(c => c.id === currentTab);
-              
-              // Normal Category Tab with nested subcategory views
               if (!currentCatObj) return null;
-              
-              // We'll group active products by subcategory
+
+              // Group by subcategory, in the configured order, then any extra ones
               const predefinedSubcats = currentCatObj.subcategories;
               const usedSubcats = Array.from(new Set(activeProducts.map(p => p.subcategory)));
               const customSubcats = usedSubcats.filter(sub => !predefinedSubcats.includes(sub));
-              const allSubcatGroups = [...predefinedSubcats, ...customSubcats];
-              
-              // Filter to find subcat groups that have matching active filtered products
-              const nonAndEmptyGroups = allSubcatGroups.filter(subName => {
-                const groupProds = activeProducts
-                      .filter(p => p.subcategory === subName)
-                      .sort((a, b) => {
-                        const aOpened = a.instances.some(i => i.usage === '使用中') ? 1 : 0;
-                        const bOpened = b.instances.some(i => i.usage === '使用中') ? 1 : 0;
-                        return bOpened - aOpened;
-                      });
-                return groupProds.length > 0;
-              });
+              const groups = [...predefinedSubcats, ...customSubcats]
+                .filter(subName => activeProducts.some(p => p.subcategory === subName));
 
-              if (nonAndEmptyGroups.length === 0) {
+              if (groups.length === 0) {
                 return (
-                  <div className="text-center py-12 bg-retro-card rounded-2xl border border-retro-text/10">
-                    <p className="text-sm text-retro-text/50 font-semibold">此分類下尚無符合商品</p>
-                    <button 
+                  <div className="text-center py-12">
+                    <p className="text-sm text-retro-text/40 font-semibold">這個分類還沒有商品</p>
+                    <button
                       onClick={() => {
                         clearForm();
                         setFormCategory(currentTab);
                         setShowAddForm(true);
                       }}
-                      className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 bg-retro-primary text-retro-card rounded-xl text-xs font-bold shadow hover:brightness-105 active:scale-95 transition-all cursor-pointer"
+                      className="mt-3 inline-flex items-center gap-1.5 h-10 px-4 bg-retro-secondary text-retro-card rounded-xl text-sm font-bold shadow-sm hover:brightness-105 active:scale-95 transition-all cursor-pointer"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-4 h-4" />
                       新增商品
                     </button>
                   </div>
@@ -3579,52 +2769,31 @@ ${categoryOptions}
 
               return (
                 <div className="space-y-6">
-                  {nonAndEmptyGroups.map(subName => {
+                  {groups.map(subName => {
                     const groupProds = activeProducts
                       .filter(p => p.subcategory === subName)
-                      .sort((a, b) => {
-                        const aOpened = a.instances.some(i => i.usage === '使用中') ? 1 : 0;
-                        const bOpened = b.instances.some(i => i.usage === '使用中') ? 1 : 0;
-                        return bOpened - aOpened;
-                      });
+                      .sort(inUseFirst);
                     const stats = getSubcategoryStats(subName, currentTab);
 
                     return (
-                      <div key={subName} className="space-y-2.5 animate-fade-in">
-                        <div className="flex items-center text-xs text-retro-text/70 font-bold tracking-wider px-1">
-                          <span className="text-retro-text/30 mr-1.5 font-normal">└</span>
-                          <span>{subName}</span>
-                          <span className="ml-auto text-[10px] bg-retro-primary/10 text-retro-primary px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 shadow-sm">
+                      <section key={subName} className="space-y-2.5 animate-fade-in">
+                        <div className="flex items-center justify-between px-1">
+                          <h3 className="text-xs font-bold text-retro-text/60 tracking-wide">{subName}</h3>
+                          <span className="text-[11px] font-bold text-retro-text/45 flex items-center gap-2.5">
                             <span className="flex items-center gap-1" title="未開封">
-                              <Package className="w-3 h-3" />
-                              <span>{stats.unopenedQty}</span>
+                              <Package className="w-3.5 h-3.5 text-retro-primary" />
+                              {stats.unopenedQty}
                             </span>
-                            <span className="w-px h-2.5 bg-retro-primary/20"></span>
-                            <span className="flex items-center gap-1 text-emerald-600" title="使用中">
-                              <PackageOpen className="w-3 h-3" />
-                              <span>{stats.openedQty}</span>
+                            <span className="flex items-center gap-1" title="使用中">
+                              <PackageOpen className="w-3.5 h-3.5 text-emerald-600" />
+                              {stats.openedQty}
                             </span>
                           </span>
                         </div>
-
-                        <div className="space-y-3">
-                          {groupProds.map(prod => (
-                            <div key={prod.id}>
-                              <ProductCard 
-                              userId={user.uid}
-                              onPreviewReady={handlePreviewReady}
-                              product={prod} 
-                              onViewDetail={setSelectedDetailProduct}
-                              onEdit={handleEditInstanceTrigger}
-                              onArchive={handleArchiveInstance}
-                              onAddAnother={handleAddAnotherInstanceTrigger}
-                              onImageClick={setFullscreenImage}
-                              categoryIcon={categories.find(c => c.id === prod.category)?.icon || 'sparkles'}
-                            />
-                            </div>
-                          ))}
+                        <div className="space-y-2.5">
+                          {groupProds.map(renderCard)}
                         </div>
-                      </div>
+                      </section>
                     );
                   })}
                 </div>
@@ -3635,565 +2804,314 @@ ${categoryOptions}
       </div>
 
       {/* 7. Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-retro-card border-t border-retro-text/10 flex justify-around items-center pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] px-2 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-40 max-w-2xl mx-auto overflow-x-auto">
+      <nav className="fixed bottom-0 left-0 right-0 bg-retro-card border-t border-retro-text/10 flex justify-around items-center pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-2 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-40 max-w-2xl mx-auto overflow-x-auto">
         {categories.map(cat => (
-          <button 
+          <button
             key={cat.id}
             onClick={() => handleTabChange(cat.id)}
-            className={`flex flex-col items-center gap-1 text-[10px] font-bold min-w-[56px] transition-colors py-1 px-1.5 rounded-lg active:bg-retro-bg/40 ${currentTab === cat.id ? 'text-retro-primary bg-retro-primary/5' : 'text-retro-text/50'}`}
+            aria-current={currentTab === cat.id ? 'page' : undefined}
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-bold min-w-[60px] h-12 transition-colors px-1.5 rounded-xl active:bg-retro-bg/40 ${currentTab === cat.id ? 'text-retro-primary bg-retro-primary/10' : 'text-retro-text/45'}`}
           >
             <CategoryIcon name={cat.icon} className="w-5 h-5" />
-            <span className="truncate max-w-[56px]">{cat.name}</span>
+            <span className="truncate max-w-[60px]">{cat.name}</span>
           </button>
         ))}
         {/* Fixed Settings Tab */}
-        <button 
+        <button
           onClick={() => handleTabChange('settings')}
-          className={`flex flex-col items-center gap-1 text-[10px] font-bold min-w-[56px] transition-colors py-1 px-1.5 rounded-lg active:bg-retro-bg/40 ${currentTab === 'settings' ? 'text-retro-primary bg-retro-primary/5' : 'text-retro-text/50'}`}
+          aria-current={currentTab === 'settings' ? 'page' : undefined}
+          className={`flex flex-col items-center justify-center gap-1 text-[11px] font-bold min-w-[60px] h-12 transition-colors px-1.5 rounded-xl active:bg-retro-bg/40 ${currentTab === 'settings' ? 'text-retro-primary bg-retro-primary/10' : 'text-retro-text/45'}`}
         >
           <Settings className="w-5 h-5" />
           <span>設定</span>
         </button>
       </nav>
 
-      {/* Toast Alert overlay */}
-      {toastMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-5 py-3 bg-stone-900/90 text-white rounded-full text-xs font-bold shadow-lg z-50 pointer-events-none transition-all duration-300 transform scale-100 flex items-center gap-2">
-          <Info className="w-4 h-4 text-retro-primary animate-pulse" />
-          {toastMessage}
-        </div>
-      )}
-
-      {/* ==================== 8. Detailed Product View Modal (Requirement 1: 完整畫面) ==================== */}
-      {selectedDetailProduct && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
-          <div className="w-full h-[100dvh] sm:h-auto sm:max-w-md bg-white sm:border-2 border-retro-text sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[85dvh] animate-slide-up pb-safe">
-            {/* Top Bar with Drag Handle for Mobile / Header */}
-            <div className="relative pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-5 border-b border-retro-text/5 flex items-start gap-4 bg-transparent">
-              {selectedDetailProduct.photo ? (
-                <CachedImage
-                  src={selectedDetailProduct.photo}
-                  userId={user.uid}
-                  thumbnail={selectedDetailProduct.photoThumbnail} 
-                  alt={selectedDetailProduct.name}
-                  onClick={() => setFullscreenImage(selectedDetailProduct.photo!)}
-                  className="h-18 w-18 flex-shrink-0"
-                  imageClassName="h-18 w-auto max-w-[8rem] rounded-xl object-cover border border-retro-text/10 shadow-sm cursor-pointer hover:scale-105 transition-transform"
-                />
-              ) : (
-                <div className="w-14 h-18 rounded-xl bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary flex-shrink-0">
-                  <CategoryIcon name={categories.find(c => c.id === selectedDetailProduct.category)?.icon || 'sparkles'} className="w-6 h-6 opacity-40" />
-                </div>
-              )}
-              
-              <div className="flex-1 min-w-0 pr-6">
-                <span className="text-[10px] font-extrabold text-retro-secondary tracking-widest uppercase block">
-                  {selectedDetailProduct.brand}
-                </span>
-                <h3 className="text-base font-bold text-retro-text leading-snug mt-0.5 line-clamp-2">
-                  {selectedDetailProduct.name}
-                </h3>
-                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                  <span className="text-[10px] font-bold bg-retro-primary/10 text-retro-primary px-2.5 py-0.5 rounded-full">
-                    {categories.find(c => c.id === selectedDetailProduct.category)?.name || selectedDetailProduct.category}
-                  </span>
-                  {selectedDetailProduct.subcategory && (
-                    <span className="text-[10px] font-bold bg-retro-secondary/5 text-retro-secondary border border-retro-secondary/10 px-2.5 py-0.5 rounded-full">
-                      {selectedDetailProduct.subcategory}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Close Button */}
-              <button 
-                onClick={() => setSelectedDetailProduct(null)}
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 flex items-center justify-center transition-colors cursor-pointer animate-fade-in"
-                title="關閉"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Middle Nav Buttons */}
-            <div className="p-3 bg-transparent border-b border-retro-text/5 grid grid-cols-4 gap-2 flex-shrink-0">
+      {/* Toast */}
+      {toast && (
+        <div
+          className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-[130] w-max max-w-[calc(100vw-2rem)] pointer-events-none animate-fade-in"
+          role="status"
+          aria-live="polite"
+        >
+          <div className={`flex items-center gap-2 bg-stone-800/95 text-white rounded-full text-sm font-bold shadow-lg ${toast.undo ? 'pl-4 pr-1.5 py-1.5 pointer-events-auto' : 'px-4 py-2.5'}`}>
+            <span>{toast.message}</span>
+            {toast.undo && (
               <button
-                onClick={() => setDetailActiveTab('status')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-xl transition-all border flex flex-col items-center gap-0.5 cursor-pointer ${
-                  detailActiveTab === 'status'
-                    ? 'bg-retro-primary text-retro-card border-retro-primary shadow-sm scale-[1.02]'
-                    : 'bg-white text-retro-text/60 border-retro-text/5 hover:text-retro-text hover:bg-stone-50'
-                }`}
+                onClick={() => toast.undo?.()}
+                className="h-8 px-3 rounded-full bg-white/15 hover:bg-white/25 text-white text-sm font-bold flex items-center gap-1 transition-colors"
               >
-                <Package className="w-3.5 h-3.5" />
-                <span>數量狀況</span>
+                <RotateCcw className="w-3.5 h-3.5" />
+                復原
               </button>
-
-              <button
-                onClick={() => setDetailActiveTab('purchase')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-xl transition-all border flex flex-col items-center gap-0.5 cursor-pointer ${
-                  detailActiveTab === 'purchase'
-                    ? 'bg-retro-secondary text-retro-card border-retro-secondary shadow-sm scale-[1.02]'
-                    : 'bg-white text-retro-text/60 border-retro-text/5 hover:text-retro-text hover:bg-stone-50'
-                }`}
-              >
-                <ShoppingCart className="w-3.5 h-3.5" />
-                <span>購買紀錄</span>
-              </button>
-
-              <button
-                onClick={() => setDetailActiveTab('usage')}
-                className={`py-2 px-1 text-[11px] font-bold rounded-xl transition-all border flex flex-col items-center gap-0.5 cursor-pointer ${
-                  detailActiveTab === 'usage'
-                    ? 'bg-amber-600 text-retro-card border-amber-600 shadow-sm scale-[1.02]'
-                    : 'bg-white text-retro-text/60 border-retro-text/5 hover:text-retro-text hover:bg-stone-50'
-                }`}
-              >
-                <History className="w-3.5 h-3.5" />
-                <span>使用紀錄</span>
-              </button>
-
-              <button
-                onClick={() => handleEditProductMasterTrigger(selectedDetailProduct)}
-                className="py-2 px-1 text-[11px] font-bold bg-white text-retro-text/60 hover:text-retro-primary border border-retro-text/5 hover:border-retro-primary/20 rounded-xl transition-all flex flex-col items-center gap-0.5 cursor-pointer"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>編輯大品項</span>
-              </button>
-              {selectedDetailProduct.status === 'archived' && (
-                <button
-                  onClick={() => {
-                    askConfirmation(
-                      '永久刪除紀錄',
-                      `確定要從歷史封存中永久刪除「${selectedDetailProduct.name}」的所有紀錄嗎？\n此操作將會刪除包含購買紀錄、使用紀錄等所有資料，且無法復原。`,
-                      () => {
-                        const remainingProducts = products.filter(product => product.id !== selectedDetailProduct.id);
-                        setProducts(remainingProducts);
-                        queueProductPhotoCleanup(selectedDetailProduct.photo);
-                        setSelectedDetailProduct(null);
-                        showToast('已永久刪除該紀錄');
-                      }
-                    );
-                  }}
-                  className="py-2 px-1 text-[11px] font-bold bg-white text-red-400 hover:text-red-500 hover:bg-red-50 border border-retro-text/5 hover:border-red-200 rounded-xl transition-all flex flex-col items-center gap-0.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>永久刪除</span>
-                </button>
-              )}
-            </div>
-
-            {/* Scrollable Content Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {detailActiveTab === 'status' ? (
-                /* Tab 1 Content: 商品數量狀況 */
-                <div className="space-y-4 animate-fade-in">
-                  
-                  {/* Overall Restock Warning */}
-                  {(() => {
-                    const totalUnopened = selectedDetailProduct.instances.filter(inst => inst.usage === '未開封').reduce((sum, inst) => sum + inst.qty, 0);
-                    if (selectedDetailProduct.threshold > 0 && totalUnopened <= selectedDetailProduct.threshold) {
-                      return (
-                        <div className="text-xs font-bold text-red-500 bg-red-50 border border-red-100 p-2.5 rounded-xl flex items-center gap-2 shadow-sm">
-                          <Info className="w-4 h-4 flex-shrink-0" />
-                          <span>庫存偏低！目前未開封總計 {totalUnopened} 件，已達補貨門檻 ({selectedDetailProduct.threshold} 件)</span>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {/* Bento Stats Counters */}
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="bg-stone-50 p-2.5 rounded-xl border border-retro-text/5 text-center flex flex-col justify-between min-h-[70px]">
-                      <span className="text-[10px] font-bold text-retro-text/50">總數量</span>
-                      <span className="text-xl font-extrabold text-retro-primary font-mono">
-                        {selectedDetailProduct.instances.reduce((sum, inst) => sum + inst.qty, 0)}
-                      </span>
-                    </div>
-                    <div className="bg-stone-50 p-2.5 rounded-xl border border-retro-text/5 text-center flex flex-col justify-between min-h-[70px]">
-                      <span className="text-[10px] font-bold text-retro-text/50">開封中數量</span>
-                      <span className="text-xl font-extrabold text-green-600 font-mono">
-                        {selectedDetailProduct.instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
-                      </span>
-                    </div>
-                    <div className="bg-stone-50 p-2.5 rounded-xl border border-retro-text/5 text-center flex flex-col justify-between min-h-[70px]">
-                      <span className="text-[10px] font-bold text-retro-text/50">最近到期天數</span>
-                      <div className="flex flex-col items-center">
-                        <span className="text-xl font-extrabold text-amber-600 font-mono leading-none">
-                          {(() => {
-                            let minDays = 9999;
-                            selectedDetailProduct.instances.forEach(inst => {
-                              const days = calculateDaysToExpiry(inst.expiry);
-                              if (days < minDays) minDays = days;
-                            });
-                            return minDays !== 9999 ? minDays : '-';
-                          })()}
-                        </span>
-                        {(() => {
-                          let closestDate = null;
-                          let minDays = 9999;
-                          selectedDetailProduct.instances.forEach(inst => {
-                            const days = calculateDaysToExpiry(inst.expiry);
-                            if (days < minDays && inst.expiry) {
-                              minDays = days;
-                              closestDate = inst.expiry;
-                            }
-                          });
-                          return minDays !== 9999 && closestDate ? (
-                            <span className="text-[9px] font-bold text-retro-text/40 mt-1">
-                              {closestDate.replace(/-/g, '/')}
-                            </span>
-                          ) : null;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Detailed Instances List */}
-                  <div className="space-y-3">
-                    <span className="text-[11px] font-extrabold text-retro-text/50 uppercase tracking-wider block">
-                      📋 規格明細與狀態
-                    </span>
-                    {[...selectedDetailProduct.instances].sort((a, b) => (b.usage === '使用中' ? 1 : 0) - (a.usage === '使用中' ? 1 : 0)).map((inst, index) => {
-                      const daysLeft = calculateDaysToExpiry(inst.expiry);
-                      const isUrgent = daysLeft <= 60;
-                      const pao = calculatePaoExpiry(inst.openedDate, inst.paoMonths);
-
-                      return (
-                        <div key={inst.id} className="p-3 bg-white rounded-xl border border-retro-text/10 space-y-2 shadow-xs">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-retro-text bg-retro-bg/40 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                                <Package className="w-3 h-3 text-retro-primary" />
-                                {inst.qty} 件
-                              </span>
-                              {inst.capacity && (
-                                <span className="text-xs font-bold text-retro-primary bg-retro-primary/10 px-2 py-0.5 rounded-lg">
-                                  {inst.capacity}
-                                </span>
-                              )}
-                              
-                              {/* The new Usage select replacing the badge */}
-                              <div className="relative flex items-center gap-1 cursor-pointer bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded-md transition-colors ml-1 pixel-box">
-                                <span className={`w-2 h-2 rounded-full ${inst.usage === '使用中' ? 'bg-green-500 animate-pulse' : 'bg-stone-300'}`}></span>
-                                <select
-                                  value={inst.usage === '未開封' ? '未開封' : '使用中'}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === 'archived') {
-                                      handleArchiveInstance(selectedDetailProduct.id, inst.id);
-                                    } else {
-                                      const nextProducts = products.map(prod => {
-                                        if (prod.id === selectedDetailProduct.id) {
-                                          return {
-                                            ...prod,
-                                            instances: prod.instances.map(i => {
-                                              if (i.id === inst.id) {
-                                                return { 
-                                                  ...i, 
-                                                  usage: val as any,
-                                                  openedDate: val === '使用中' && !i.openedDate ? new Date().toISOString().split('T')[0] : i.openedDate
-                                                };
-                                              }
-                                              return i;
-                                            })
-                                          };
-                                        }
-                                        return prod;
-                                      });
-                                      setProducts(nextProducts);
-                                      const updated = nextProducts.find(p => p.id === selectedDetailProduct.id);
-                                      if (updated) setSelectedDetailProduct(updated);
-                                      showToast(`狀態已變更為：${val === '未開封' ? '未使用' : '已開封'}`);
-                                    }
-                                  }}
-                                  className="text-xs font-bold text-retro-text/80 bg-transparent outline-none cursor-pointer appearance-none pr-3 relative z-10 no-pixel-border"
-                                >
-                                  <option value="未開封">未使用</option>
-                                  <option value="使用中">已開封</option>
-                                  <option value="archived">封存</option>
-                                </select>
-                                <ChevronDown className="w-3 h-3 absolute right-1 text-retro-text/40 pointer-events-none" />
-                              </div>
-
-                            </div>
-
-                            {/* Instance edit/delete buttons */}
-                            {selectedDetailProduct.status !== 'archived' && (
-                              <div className="flex items-center gap-2 bg-stone-50 rounded-lg px-2 py-0.5">
-                                <button 
-                                  onClick={() => {
-                                    handleDuplicateInstanceTrigger(selectedDetailProduct, inst);
-                                  }}
-                                  className="action-btn-no-pixel text-emerald-500 hover:text-emerald-600 p-0.5 transition-colors cursor-pointer"
-                                  title="複製此明細去新增"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                </button>
-
-                                <span className="w-[1px] h-3 bg-retro-text/10"></span>
-
-                                <button 
-                                  onClick={() => {
-                                    handleEditInstanceTrigger(selectedDetailProduct, inst);
-                                  }}
-                                  className="action-btn-no-pixel text-retro-primary hover:text-retro-secondary p-0.5 transition-colors cursor-pointer"
-                                  title="編輯此明細"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                </button>
-                                
-                                <span className="w-[1px] h-3 bg-retro-text/10"></span>
-                                <button 
-                                  onClick={() => handleDeleteInstanceDirect(selectedDetailProduct.id, inst.id)}
-                                  className="action-btn-no-pixel text-red-400 hover:text-red-600 p-0.5 transition-colors cursor-pointer"
-                                  title="永久刪除此細項"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* PAO Expiry / Date Details Grid */}
-                          <div className="rounded-xl overflow-hidden bg-stone-50 mt-2 border border-retro-text/10">
-                            {/* Row 1: Expiry */}
-                            <div className="grid grid-cols-3 divide-x divide-retro-text/10 border-b border-retro-text/10 bg-retro-bg/30 text-[10px] font-bold text-retro-text/60">
-                              <div className="px-3 py-1.5 flex items-center">數量 / 容量</div>
-                              <div className="px-3 py-1.5 flex items-center">有效期限</div>
-                              <div className="px-3 py-1.5 flex items-center">剩餘</div>
-                            </div>
-                            <div className="grid grid-cols-3 divide-x divide-retro-text/10 bg-white text-xs font-bold text-retro-text">
-                              <div className="px-3 py-2.5 flex items-center">{inst.qty} / {inst.capacity || '-'}</div>
-                              <div className="px-3 py-2.5 flex items-center">{inst.expiry ? inst.expiry : '-'}</div>
-                              <div className="px-3 py-2.5 flex items-center justify-between">
-                                <span className={isUrgent ? 'text-red-500' : ''}>
-                                  {daysLeft !== 9999 ? `${daysLeft} 天` : '-'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Row 2: PAO (Only if in use and has PAO) */}
-                            {inst.usage === '使用中' && inst.paoMonths && inst.openedDate && pao && (
-                              <>
-                                <div className={`grid grid-cols-3 divide-x divide-retro-text/10 border-b border-t border-retro-text/10 text-[10px] font-bold ${pao.isExpired ? 'bg-red-50 text-red-600/70' : 'bg-retro-bg/30 text-retro-text/60'}`}>
-                                  <div className="px-3 py-1.5 flex items-center">開封日期</div>
-                                  <div className="px-3 py-1.5 flex items-center">使用期限</div>
-                                  <div className="px-3 py-1.5 flex items-center">剩餘</div>
-                                </div>
-                                <div className={`grid grid-cols-3 divide-x divide-retro-text/10 text-xs font-bold ${pao.isExpired ? 'bg-red-50/50 text-red-600' : 'bg-white text-retro-text'}`}>
-                                  <div className="px-3 py-2.5 flex items-center">{inst.openedDate}</div>
-                                  <div className="px-3 py-2.5 flex items-center">{pao.expiryDate}</div>
-                                  <div className="px-3 py-2.5 flex items-center justify-between">
-                                    <span>
-                                      {pao.isExpired ? `${pao.daysOverdue} 天 (過期)` : `${pao.daysLeft} 天`}
-                                    </span>
-                                  </div>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : detailActiveTab === 'purchase' ? (
-                /* Tab 2 Content: 購買紀錄 */
-                (() => {
-                  const allPurchaseInstances = products
-                    .filter(p => p.brand === selectedDetailProduct.brand && p.name === selectedDetailProduct.name)
-                    .flatMap(p => p.instances.map(inst => ({ ...inst, isArchived: p.status === 'archived' })))
-                    .sort((a, b) => {
-                      if (a.purchaseDate && b.purchaseDate) {
-                        return new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime();
-                      }
-                      return 0;
-                    });
-                    
-                  const instancesWithPurchaseInfo = allPurchaseInstances.filter(inst => inst.purchaseDate || inst.purchasePlace || inst.price !== undefined);
-
-                  return (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="bg-stone-50 px-3 py-2.5 rounded-xl border border-retro-text/5 flex justify-between items-center">
-                        <span className="text-xs font-bold text-retro-text/60">購買明細筆數</span>
-                        <span className="text-sm font-extrabold text-retro-secondary font-mono">
-                          總筆數：{allPurchaseInstances.length} 筆
-                        </span>
-                      </div>
-
-                      <div className="space-y-3">
-                        <span className="text-[11px] font-extrabold text-retro-text/50 uppercase tracking-wider block">
-                          🛒 每一筆的購買明細紀錄 (含封存)
-                        </span>
-                        
-                        <div className="overflow-hidden rounded-xl border border-retro-text/5 bg-white shadow-xs">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="bg-stone-50 border-b border-retro-text/5 text-[10px] uppercase text-retro-text/50">
-                                <th className="p-2.5 font-bold whitespace-nowrap">日期</th>
-                                <th className="p-2.5 font-bold whitespace-nowrap">地點</th>
-                                <th className="p-2.5 font-bold text-center whitespace-nowrap">數量</th>
-                                <th className="p-2.5 font-bold text-right whitespace-nowrap">單價</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-retro-text/5">
-                              {allPurchaseInstances.map((inst, index) => {
-                                const hasPurchaseInfo = inst.purchaseDate || inst.purchasePlace || inst.price !== undefined;
-                                if (!hasPurchaseInfo) return null;
-                                return (
-                                  <tr key={inst.id} className={`text-xs text-retro-text ${inst.isArchived ? 'opacity-50 grayscale' : ''}`}>
-                                    <td className="p-2.5 font-mono">{inst.purchaseDate || '-'}</td>
-                                    <td className="p-2.5">{inst.purchasePlace || '-'}</td>
-                                    <td className="p-2.5 font-mono text-center">{inst.qty || '-'}</td>
-                                    <td className="p-2.5 font-mono font-bold text-right text-retro-secondary">{inst.price !== undefined ? `$${inst.price}` : '-'}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          {instancesWithPurchaseInfo.length === 0 && (
-                            <div className="py-6 text-center text-xs text-stone-400 font-semibold bg-white">
-                              暫無購買紀錄
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <p className="text-[10px] text-center text-stone-400 font-semibold pt-1">
-                        💡 提示：點擊右上角的編輯圖示（數量狀況頁籤中）即可新增購買紀錄
-                      </p>
-                    </div>
-                  );
-                })()
-              ) : (
-                /* Tab 3 Content: 使用紀錄 */
-                (() => {
-                  const allUsageInstances = products
-                    .filter(p => p.brand === selectedDetailProduct.brand && p.name === selectedDetailProduct.name)
-                    .flatMap(p => p.instances)
-                    .filter(inst => inst.usage === '已用完' || inst.usage === '已丟棄' || (inst.usage === '使用中' && inst.openedDate))
-                    .sort((a, b) => {
-                      if (a.openedDate && b.openedDate) {
-                        return new Date(b.openedDate).getTime() - new Date(a.openedDate).getTime();
-                      }
-                      return 0;
-                    });
-
-                  return (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="bg-stone-50 px-3 py-2.5 rounded-xl border border-retro-text/5 flex justify-between items-center">
-                        <span className="text-xs font-bold text-retro-text/60">使用紀錄筆數</span>
-                        <span className="text-sm font-extrabold text-amber-600 font-mono">
-                          總計：{allUsageInstances.length} 筆
-                        </span>
-                      </div>
-
-                      <div className="space-y-3">
-                        <span className="text-[11px] font-extrabold text-retro-text/50 uppercase tracking-wider block">
-                          ⌛ 從開封到用完/丟棄的時間
-                        </span>
-                        
-                        <div className="overflow-hidden rounded-xl border border-retro-text/5 bg-white shadow-xs">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="bg-stone-50 border-b border-retro-text/5 text-[10px] uppercase text-retro-text/50">
-                                <th className="p-2.5 font-bold whitespace-nowrap">狀態</th>
-                                <th className="p-2.5 font-bold whitespace-nowrap">期間</th>
-                                <th className="p-2.5 font-bold text-right whitespace-nowrap">花費時間</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-retro-text/5">
-                              {allUsageInstances.map(inst => {
-                                let durationStr = '-';
-                                if (inst.openedDate) {
-                                  const endD = (inst.usage === '已用完' || inst.usage === '已丟棄') && inst.finishedDate 
-                                    ? new Date(inst.finishedDate) 
-                                    : new Date();
-                                  const startD = new Date(inst.openedDate);
-                                  const diffMs = endD.getTime() - startD.getTime();
-                                  if (diffMs >= 0) {
-                                    const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                                    const years = Math.floor(totalDays / 365);
-                                    const months = Math.floor((totalDays % 365) / 30);
-                                    const days = (totalDays % 365) % 30;
-                                    
-                                    const parts = [];
-                                    if (years > 0) parts.push(`${years}年`);
-                                    if (months > 0) parts.push(`${months}個月`);
-                                    if (years === 0 && months === 0) parts.push(`${days}天`);
-                                    durationStr = parts.join('');
-                                  }
-                                }
-                                
-                                return (
-                                  <tr key={inst.id} className={`text-xs text-retro-text`}>
-                                    <td className="p-2.5">
-                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                        inst.usage === '使用中' ? 'bg-green-100 text-green-700' :
-                                        inst.usage === '已用完' ? 'bg-stone-200 text-stone-600' :
-                                        'bg-red-100 text-red-600'
-                                      }`}>
-                                        {inst.usage}
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 font-mono text-[10px] text-stone-500">
-                                      <div>{inst.openedDate || '-'}</div>
-                                      <div>~ {inst.finishedDate || (inst.usage === '使用中' ? '至今' : '-')}</div>
-                                    </td>
-                                    <td className="p-2.5 font-bold text-right text-amber-600">{durationStr}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          {allUsageInstances.length === 0 && (
-                            <div className="py-6 text-center text-xs text-stone-400 font-semibold bg-white">
-                              暫無使用紀錄 (需設定開封日期)
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-            )}
-            
-            {/* Quick add instance footer */}
-            {selectedDetailProduct.status !== 'archived' && (
-              <div className="p-3 border-t border-retro-text/5 bg-white/90 backdrop-blur-sm flex gap-2 flex-shrink-0">
-                <button 
-                  onClick={() => {
-                    handleAddAnotherInstanceTrigger(selectedDetailProduct);
-                  }}
-                  className="w-full py-2.5 bg-retro-secondary hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  新增此產品的其他庫存/規格
-                </button>
-              </div>
             )}
           </div>
         </div>
-      </div>
       )}
 
-      {/* ==================== 9. Custom Confirmation Dialog (Requirement 2: Resolve iframe window.confirm blocks) ==================== */}
-      {confirmDialog && (
-        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-xs z-[100] flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-xs bg-white border-2 border-retro-text rounded-2xl overflow-hidden shadow-2xl p-5 space-y-4 animate-slide-up">
-            <div className="flex items-center gap-2 text-retro-secondary">
-              <Info className="w-5 h-5 flex-shrink-0 text-retro-primary" />
-              <span className="font-extrabold text-sm uppercase tracking-wider">{confirmDialog.title}</span>
+      {/* ==================== 8. Product Detail ==================== */}
+      {selectedDetailProduct && (() => {
+        const product = selectedDetailProduct;
+        const isArchivedProduct = product.status === 'archived';
+        const liveItems = product.instances.filter(inst => isActiveUsage(inst.usage));
+        const stockQty = liveItems.reduce((sum, inst) => sum + inst.qty, 0);
+        const inUseQty = liveItems.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0);
+        const nearest = liveItems
+          .map(getInstanceDeadline)
+          .reduce((best, current) => (current.days < best.days ? current : best), { days: 9999, date: '' });
+        const usageOrder: Record<string, number> = { '使用中': 0, '未開封': 1, '已用完': 2, '已丟棄': 3 };
+        const sortedItems = [...product.instances].sort((a, b) => (usageOrder[a.usage] ?? 9) - (usageOrder[b.usage] ?? 9));
+        const recordDate = (inst: ProductInstance) => inst.purchaseDate || inst.openedDate || inst.finishedDate || '';
+        const records = products
+          .filter(p => p.brand === product.brand && p.name === product.name)
+          .flatMap(p => p.instances)
+          .filter(inst => inst.purchaseDate || inst.purchasePlace || inst.price !== undefined || inst.openedDate || inst.finishedDate)
+          .sort((a, b) => recordDate(b).localeCompare(recordDate(a)));
+        const categoryOfProduct = categories.find(c => c.id === product.category);
+
+        return (
+          <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in">
+            <div className="w-full h-[100dvh] sm:h-auto sm:max-h-[85dvh] sm:max-w-md bg-retro-card sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col animate-slide-up">
+              {/* Header */}
+              <div className="flex items-start gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+                {product.photo ? (
+                  <CachedImage
+                    src={product.photo}
+                    userId={user.uid}
+                    thumbnail={product.photoThumbnail}
+                    alt={product.name}
+                    onClick={() => setFullscreenImage(product.photo!)}
+                    className="w-16 h-20 flex-shrink-0 flex items-center justify-center cursor-zoom-in"
+                    imageClassName="max-w-full max-h-full rounded-xl object-contain"
+                  />
+                ) : (
+                  <div className="w-16 h-20 flex-shrink-0 rounded-xl bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary">
+                    <CategoryIcon name={categoryOfProduct?.icon || 'sparkles'} className="w-6 h-6 opacity-40" />
+                  </div>
+                )}
+
+                <div className="flex-1 min-w-0 pt-1">
+                  <p className="text-[11px] font-bold text-retro-secondary tracking-wider uppercase truncate">{product.brand}</p>
+                  <h3 className="text-base font-bold text-retro-text leading-snug mt-0.5 line-clamp-2">{product.name}</h3>
+                  <p className="text-xs font-semibold text-retro-text/45 mt-1 truncate">
+                    {categoryOfProduct?.name || product.category}
+                    {product.subcategory ? ` · ${product.subcategory}` : ''}
+                  </p>
+                </div>
+
+                <div className="flex items-center -mr-1.5 -mt-0.5 flex-shrink-0">
+                  {!isArchivedProduct && (
+                    <button
+                      onClick={() => handleEditProductMasterTrigger(product)}
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-retro-text/50 hover:text-retro-text hover:bg-retro-bg transition-colors cursor-pointer"
+                      aria-label="編輯品項"
+                    >
+                      <Pencil className="w-4.5 h-4.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedDetailProduct(null)}
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-retro-text/50 hover:text-retro-text hover:bg-retro-bg transition-colors cursor-pointer"
+                    aria-label="關閉"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="px-4 pb-3">
+                <div className="grid grid-cols-2 gap-1 p-1 bg-retro-bg/70 rounded-xl" role="tablist">
+                  {([['items', '庫存'], ['records', records.length ? `紀錄 ${records.length}` : '紀錄']] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      role="tab"
+                      aria-selected={detailActiveTab === tab}
+                      onClick={() => setDetailActiveTab(tab)}
+                      className={`h-9 rounded-lg text-sm font-bold transition-colors ${detailActiveTab === tab ? 'bg-white text-retro-text shadow-sm' : 'text-retro-text/45 hover:text-retro-text/70'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4 space-y-2.5">
+                {detailActiveTab === 'items' ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-white rounded-2xl px-2 py-3 text-center">
+                        <p className="text-[11px] font-bold text-retro-text/45">庫存</p>
+                        <p className="text-xl font-extrabold text-retro-text font-mono mt-0.5">{stockQty}</p>
+                      </div>
+                      <div className="bg-white rounded-2xl px-2 py-3 text-center">
+                        <p className="text-[11px] font-bold text-retro-text/45">使用中</p>
+                        <p className="text-xl font-extrabold text-retro-primary font-mono mt-0.5">{inUseQty}</p>
+                      </div>
+                      <div className="bg-white rounded-2xl px-2 py-3 text-center">
+                        <p className="text-[11px] font-bold text-retro-text/45">最近到期</p>
+                        <p className={`text-xl font-extrabold font-mono mt-0.5 ${nearest.days <= 60 ? 'text-retro-danger' : 'text-retro-secondary'}`}>
+                          {nearest.days !== 9999 ? nearest.days : '—'}
+                          {nearest.days !== 9999 && <span className="text-xs font-bold ml-0.5">天</span>}
+                        </p>
+                        {nearest.date && <p className="text-[10px] font-bold text-retro-text/35">{fmtDate(nearest.date)}</p>}
+                      </div>
+                    </div>
+
+                    {sortedItems.map(inst => {
+                      const expiryDays = inst.expiry ? calculateDaysToExpiry(inst.expiry) : null;
+                      const pao = inst.usage === '使用中' ? calculatePaoExpiry(inst.openedDate, inst.paoMonths) : null;
+                      const purchase = [
+                        inst.purchaseDate ? fmtDate(inst.purchaseDate) : '',
+                        inst.purchasePlace || '',
+                        inst.price !== undefined ? `$${inst.price}` : ''
+                      ].filter(Boolean).join(' · ');
+
+                      return (
+                        <div key={inst.id} className="p-3 bg-white rounded-2xl space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${usageChipClass(inst.usage)}`}>{inst.usage}</span>
+                            {inst.capacity && <span className="text-xs font-bold text-retro-text/55">{inst.capacity}</span>}
+                            {!isArchivedProduct && (
+                              <div className="ml-auto flex items-center gap-1">
+                                {inst.usage === '未開封' && (
+                                  <button
+                                    onClick={() => handleOpenInstance(product.id, inst.id)}
+                                    className="h-9 px-3.5 rounded-full bg-retro-primary/15 text-retro-primary text-xs font-bold flex items-center gap-1 hover:bg-retro-primary/25 transition-colors cursor-pointer"
+                                  >
+                                    <PackageOpen className="w-3.5 h-3.5" />
+                                    開封
+                                  </button>
+                                )}
+                                {inst.usage === '使用中' && (
+                                  <button
+                                    onClick={() => handleFinishInstance(product.id, inst.id)}
+                                    className="h-9 px-3.5 rounded-full bg-retro-secondary/15 text-retro-secondary text-xs font-bold flex items-center gap-1 hover:bg-retro-secondary/25 transition-colors cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    用完
+                                  </button>
+                                )}
+                                {!isActiveUsage(inst.usage) && (
+                                  <button
+                                    onClick={() => handleFinishInstance(product.id, inst.id)}
+                                    className="h-9 px-3.5 rounded-full bg-retro-bg text-retro-text/60 text-xs font-bold flex items-center gap-1 hover:bg-retro-bg/70 transition-colors cursor-pointer"
+                                  >
+                                    <Archive className="w-3.5 h-3.5" />
+                                    移到歷史
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleEditInstanceTrigger(product, inst)}
+                                  className="w-9 h-9 rounded-full flex items-center justify-center text-retro-text/35 hover:text-retro-text hover:bg-retro-bg transition-colors cursor-pointer"
+                                  aria-label="編輯這一件"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                            <div>
+                              <dt className="font-semibold text-retro-text/40">有效期限</dt>
+                              <dd className={`font-bold mt-0.5 ${expiryDays !== null && expiryDays <= 60 ? 'text-retro-danger' : 'text-retro-text'}`}>
+                                {inst.expiry && expiryDays !== null
+                                  ? `${fmtDate(inst.expiry)}・${expiryDays < 0 ? `過期 ${-expiryDays} 天` : `剩 ${expiryDays} 天`}`
+                                  : '—'}
+                              </dd>
+                            </div>
+                            {pao ? (
+                              <div>
+                                <dt className="font-semibold text-retro-text/40">開封後期限</dt>
+                                <dd className={`font-bold mt-0.5 ${pao.isExpired ? 'text-retro-danger' : 'text-retro-text'}`}>
+                                  {fmtDate(pao.expiryDate)}・{pao.isExpired ? `過期 ${pao.daysOverdue} 天` : `剩 ${pao.daysLeft} 天`}
+                                </dd>
+                              </div>
+                            ) : inst.openedDate && inst.usage !== '未開封' ? (
+                              <div>
+                                <dt className="font-semibold text-retro-text/40">開封日</dt>
+                                <dd className="font-bold mt-0.5 text-retro-text">{fmtDate(inst.openedDate)}</dd>
+                              </div>
+                            ) : null}
+                            {purchase && (
+                              <div className="col-span-2">
+                                <dt className="font-semibold text-retro-text/40">購買</dt>
+                                <dd className="font-bold mt-0.5 text-retro-text/80">{purchase}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : records.length === 0 ? (
+                  <p className="py-12 text-center text-sm font-semibold text-retro-text/40">還沒有購買或使用紀錄</p>
+                ) : (
+                  records.map(inst => {
+                    const duration = inst.openedDate ? formatDuration(inst.openedDate, inst.finishedDate) : '';
+                    return (
+                      <div key={inst.id} className="p-3 bg-white rounded-2xl space-y-1.5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-1 rounded-full font-bold ${usageChipClass(inst.usage)}`}>{inst.usage}</span>
+                          {inst.capacity && <span className="font-bold text-retro-text/55">{inst.capacity}</span>}
+                          {inst.price !== undefined && <span className="ml-auto text-sm font-bold text-retro-secondary">${inst.price}</span>}
+                        </div>
+                        {(inst.purchaseDate || inst.purchasePlace) && (
+                          <p className="font-semibold text-retro-text/60">
+                            購買　{[inst.purchaseDate ? fmtDate(inst.purchaseDate) : '', inst.purchasePlace || ''].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                        {inst.openedDate && (
+                          <p className="font-semibold text-retro-text/60">
+                            使用　{fmtDate(inst.openedDate)} → {inst.finishedDate ? fmtDate(inst.finishedDate) : '至今'}{duration ? `（${duration}）` : ''}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              {!isArchivedProduct && (
+                <div className="px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-retro-text/5">
+                  <button
+                    onClick={() => handleAddAnotherInstanceTrigger(product)}
+                    className="w-full h-12 bg-retro-secondary text-retro-card rounded-xl text-sm font-bold shadow-sm hover:brightness-105 active:scale-[0.99] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    再加一瓶
+                  </button>
+                </div>
+              )}
             </div>
-            <p className="text-xs font-bold text-stone-600 leading-relaxed whitespace-pre-line">
+          </div>
+        );
+      })()}
+
+      {/* ==================== 9. Confirmation Dialog ==================== */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 bg-stone-900/50 backdrop-blur-xs z-[100] flex items-center justify-center p-6 animate-fade-in"
+          onClick={() => setConfirmDialog(null)}
+        >
+          <div
+            className="w-full max-w-xs bg-white rounded-3xl shadow-2xl p-5 space-y-3 animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-title"
+          >
+            <h3 id="confirm-title" className="font-bold text-base text-retro-text">{confirmDialog.title}</h3>
+            <p className="text-sm text-retro-text/60 leading-relaxed whitespace-pre-line">
               {confirmDialog.message}
             </p>
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setConfirmDialog(null)}
-                className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-xl transition-all border border-stone-200 cursor-pointer"
+                className="flex-1 h-11 bg-retro-bg/70 hover:bg-retro-bg text-retro-text/70 font-bold text-sm rounded-xl transition-colors cursor-pointer"
               >
                 取消
               </button>
@@ -4202,9 +3120,9 @@ ${categoryOptions}
                   confirmDialog.onConfirm();
                   setConfirmDialog(null);
                 }}
-                className="flex-1 py-2 bg-retro-primary hover:opacity-90 text-retro-card font-extrabold text-xs rounded-xl transition-all shadow-sm cursor-pointer"
+                className={`flex-1 h-11 text-white font-bold text-sm rounded-xl transition-all shadow-sm hover:brightness-105 cursor-pointer ${confirmDialog.danger ? 'bg-retro-danger' : 'bg-retro-primary'}`}
               >
-                確定
+                {confirmDialog.confirmLabel || '確定'}
               </button>
             </div>
           </div>
@@ -4214,61 +3132,56 @@ ${categoryOptions}
       {/* ==================== Image Cropper Modal ==================== */}
       {cropImageSrc && (
         <div className="fixed inset-0 bg-stone-900/95 backdrop-blur-md z-[120] flex flex-col items-center justify-center animate-fade-in p-4 overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
+          <div className="relative w-full max-w-2xl bg-black rounded-2xl overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
             <ReactCrop
               crop={crop}
               onChange={(c) => setCrop(c)}
               onComplete={onCropComplete}
               className="max-h-[60vh] max-w-full"
             >
-              <img 
-                src={cropImageSrc} 
-                onLoad={onImageLoad} 
+              <img
+                src={cropImageSrc}
+                onLoad={onImageLoad}
                 className="max-h-[60vh] object-contain"
-                alt="Crop" 
+                alt="裁切照片"
               />
             </ReactCrop>
           </div>
-          <div className="p-6 w-full max-w-md space-y-4">
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setCropImageSrc(null);
-                  setCroppedAreaPixels(null);
-                  setImageRef(null);
-                }}
-                className="flex-1 py-3 bg-white/10 hover:bg-white/20 text-white font-extrabold text-sm rounded-xl transition-colors cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleCropConfirm}
-                className="flex-1 py-3 bg-retro-primary hover:opacity-90 text-retro-card font-extrabold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
-              >
-                確定剪裁
-              </button>
-            </div>
+          <div className="pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] w-full max-w-md flex gap-3">
+            <button
+              onClick={handleCropCancel}
+              className="flex-1 h-12 bg-white/10 hover:bg-white/20 text-white font-bold text-sm rounded-xl transition-colors cursor-pointer"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleCropConfirm}
+              className="flex-1 h-12 bg-retro-primary hover:brightness-105 text-white font-bold text-sm rounded-xl transition-all shadow-sm cursor-pointer"
+            >
+              使用照片
+            </button>
           </div>
         </div>
       )}
 
       {/* ==================== 10. Fullscreen Image Modal ==================== */}
       {fullscreenImage && (
-        <div 
+        <div
           className="fixed inset-0 bg-stone-900/90 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-fade-in cursor-zoom-out"
           onClick={() => setFullscreenImage(null)}
         >
           <CachedImage
-            src={fullscreenImage} 
+            src={fullscreenImage}
             userId={user.uid}
-            alt="Fullscreen preview" 
+            alt="產品照片"
             className="w-full h-full flex items-center justify-center"
-            imageClassName="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-slide-up"
+            imageClassName="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl animate-slide-up"
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
           />
-          <button 
-            className="absolute top-4 right-4 sm:top-8 sm:right-8 w-10 h-10 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-black/80 transition-colors"
+          <button
+            className="absolute top-[max(1rem,env(safe-area-inset-top))] right-4 sm:right-8 w-11 h-11 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-black/80 transition-colors"
             onClick={() => setFullscreenImage(null)}
+            aria-label="關閉照片"
           >
             <X className="w-6 h-6" />
           </button>
@@ -4278,69 +3191,44 @@ ${categoryOptions}
   );
 }
 
-// Compact Single Product Card Component (Requirement 1: Click outside total card triggers complete detail view)
-function ProductCard({ 
+// Compact product card: tap to open the product page
+function ProductCard({
   userId,
   onPreviewReady,
-  product, 
+  product,
   onViewDetail,
-  onEdit, 
-  onArchive,
-  onAddAnother,
   onImageClick,
   categoryIcon,
-  onDeleteMaster,
-  onRestoreMaster
-}: { 
+  onRestore,
+  onDelete
+}: {
   userId: string;
   onPreviewReady?: (productId: string, preview: string) => void;
-  product: Product; 
-  onViewDetail: (prod: Product) => void; 
-  onEdit: (prod: Product, inst: ProductInstance) => void;
-  onArchive: (prodId: string, instId: string) => void;
-  onAddAnother: (prod: Product) => void;
+  product: Product;
+  onViewDetail?: (prod: Product) => void;
   onImageClick?: (url: string) => void;
-  onDeleteMaster?: (prod: Product) => void;
-  onRestoreMaster?: (prod: Product) => void;
   categoryIcon: string;
+  onRestore?: (prod: Product) => void;
+  onDelete?: (prod: Product) => void;
+  key?: React.Key;
 }) {
   const instances = product.instances || [];
   const isArchived = product.status === 'archived';
+  const liveInstances = instances.filter(inst => isActiveUsage(inst.usage));
 
-  // Find standard shortest expiry days to show on outer circle badge
+  // Nearest deadline (printed expiry or PAO limit) for the circle badge
   let minDaysToExpiry = 9999;
   let closestExpiryDate = '';
   let closestOpenedDate = '';
   let maxDaysSinceOpened = -1;
 
-  instances.forEach(inst => {
-    let currentMinDays = 9999;
-    let currentExpiryStr = '';
-
-    // Check normal expiry
-    if (inst.expiry) {
-      currentMinDays = calculateDaysToExpiry(inst.expiry);
-      currentExpiryStr = inst.expiry;
+  liveInstances.forEach(inst => {
+    const deadline = getInstanceDeadline(inst);
+    if (deadline.days < minDaysToExpiry) {
+      minDaysToExpiry = deadline.days;
+      closestExpiryDate = deadline.date;
     }
 
-    // Check PAO expiry
-    if (inst.usage === '使用中' && inst.paoMonths && inst.openedDate) {
-      const pao = calculatePaoExpiry(inst.openedDate, inst.paoMonths);
-      if (pao) {
-        if (pao.daysLeft < currentMinDays) {
-          currentMinDays = pao.daysLeft;
-          currentExpiryStr = pao.expiryDate;
-        }
-      }
-    }
-
-    // Update global min
-    if (currentMinDays < minDaysToExpiry) {
-      minDaysToExpiry = currentMinDays;
-      closestExpiryDate = currentExpiryStr;
-    }
-
-    // Track opened dates
     if (inst.usage === '使用中' && inst.openedDate) {
       const opened = new Date(inst.openedDate);
       const today = new Date();
@@ -4358,92 +3246,91 @@ function ProductCard({
 
   const hasAnyExpiry = minDaysToExpiry !== 9999;
   const showOpenedDateFallback = !hasAnyExpiry && closestOpenedDate !== '';
-
-  // Calculate standard warning styles
   const isUrgent = minDaysToExpiry <= 60 && hasAnyExpiry;
-  const totalQty = instances.reduce((sum, inst) => sum + inst.qty, 0);
-  const totalUnopenedQty = instances.filter(inst => inst.usage === '未開封').reduce((sum, inst) => sum + inst.qty, 0);
-  const hasInUse = instances.some(inst => inst.usage === '使用中');
-  const needsRestock = product.threshold > 0 && totalUnopenedQty <= product.threshold;
+  const unopenedQty = instances.filter(inst => inst.usage === '未開封').reduce((sum, inst) => sum + inst.qty, 0);
+  const inUseQty = instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0);
+  const archivedItem = isArchived ? instances[0] : undefined;
+  const archivedLabel = archivedItem && !isActiveUsage(archivedItem.usage) ? archivedItem.usage : '已封存';
+  const archivedDate = (archivedItem?.finishedDate || product.archivedAt?.split('T')[0] || '').replace(/-/g, '/');
+  const canOpen = !isArchived && Boolean(onViewDetail);
 
   return (
-    <div 
-      onClick={() => { if (!isArchived) onViewDetail(product); }}
-      className={`py-3.5 pr-4 pl-1.5 sm:pl-2 rounded-2xl flex items-center justify-between bg-white border border-transparent hover:border-retro-primary/30 shadow-sm transition-all duration-300 group relative ${isArchived ? 'opacity-80 grayscale' : 'cursor-pointer active:scale-[0.99]'}`}
-      title={isArchived ? "" : "點擊進入商品完整畫面"}
+    <div
+      onClick={() => { if (canOpen) onViewDetail!(product); }}
+      onKeyDown={(e) => {
+        if (canOpen && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onViewDetail!(product);
+        }
+      }}
+      role={canOpen ? 'button' : undefined}
+      tabIndex={canOpen ? 0 : undefined}
+      className={`py-3 pr-3 pl-2 rounded-2xl flex items-center gap-2.5 bg-white border border-transparent shadow-sm transition-all duration-200 group ${canOpen ? 'cursor-pointer hover:border-retro-primary/30 active:scale-[0.99]' : ''}`}
     >
-      <div className="flex gap-2.5 items-center min-w-0 flex-1">
-        {/* Thumb */}
-        <div className="w-12 h-14 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center">
-          {product.photo ? (
-            <CachedImage
-              src={product.photo}
-              userId={userId}
-              onPreviewReady={(preview: string) => onPreviewReady?.(product.id, preview)}
-              thumbnail={product.photoThumbnail} 
-              alt={product.name}
-              onClick={(e: React.MouseEvent) => {
-                if (onImageClick) {
-                  e.stopPropagation();
-                  onImageClick(product.photo!);
-                }
-              }}
-              className="w-full h-full flex items-center justify-center"
-              imageClassName="max-w-full max-h-full rounded-lg object-contain border border-retro-text/10 shadow-sm group-hover:scale-105 transition-transform"
-            />
-          ) : (
-            <div className="w-full h-full rounded-lg bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary">
-              <CategoryIcon name={categoryIcon} className="w-6 h-6 opacity-40" />
-            </div>
-          )}
-        </div>
-
-        {/* Titles */}
-        <div className="flex flex-col justify-start min-w-0 flex-1">
-          <span className="text-[10px] font-bold text-retro-secondary tracking-wider uppercase truncate flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasInUse ? 'bg-green-500 animate-pulse' : 'bg-stone-300'}`}></span>
-            {product.brand}
-          </span>
-          <span className="text-sm font-bold font-display text-retro-text leading-snug truncate group-hover:text-retro-primary transition-colors mt-0.5 flex items-center gap-2">
-            <span className="truncate">{product.name}</span>
-            {needsRestock && (
-              <span className="flex-shrink-0 bg-red-100 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                <Info className="w-3 h-3" />
-                補貨
-              </span>
-            )}
-          </span>
-          <div className="flex flex-wrap items-center gap-2 mt-1.5">
-            {!isArchived && (
-              <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-sm">
-                <span className="flex items-center gap-1" title="未開封">
-                  <Package className="w-3 h-3 text-retro-primary" />
-                  {totalUnopenedQty}
-                </span>
-                {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0) > 0 && (
-                  <>
-                    <span className="w-px h-2.5 bg-stone-300"></span>
-                    <span className="flex items-center gap-1">
-                      <PackageOpen className="w-3 h-3 text-emerald-500" />
-                      {instances.filter(inst => inst.usage === '使用中').reduce((sum, inst) => sum + inst.qty, 0)}
-                    </span>
-                  </>
-                )}
-              </span>
-            )}
-            {isArchived && product.archivedAt && (
-              <span className="text-[10px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1">
-                <ClockIcon className="w-3 h-3 text-stone-400" />
-                {product.archivedAt.split('T')[0].replace(/-/g, '/')} 封存
-              </span>
-            )}
+      {/* Thumb */}
+      <div className={`w-12 h-14 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center ${isArchived ? 'opacity-70 grayscale' : ''}`}>
+        {product.photo ? (
+          <CachedImage
+            src={product.photo}
+            userId={userId}
+            onPreviewReady={(preview: string) => onPreviewReady?.(product.id, preview)}
+            thumbnail={product.photoThumbnail}
+            alt={product.name}
+            onClick={(e: React.MouseEvent) => {
+              if (onImageClick) {
+                e.stopPropagation();
+                onImageClick(product.photo!);
+              }
+            }}
+            className="w-full h-full flex items-center justify-center"
+            imageClassName="max-w-full max-h-full rounded-lg object-contain border border-retro-text/10 shadow-sm"
+          />
+        ) : (
+          <div className="w-full h-full rounded-lg bg-retro-primary/10 border border-dashed border-retro-primary/30 flex items-center justify-center text-retro-primary">
+            <CategoryIcon name={categoryIcon} className="w-6 h-6 opacity-40" />
           </div>
+        )}
+      </div>
+
+      {/* Titles */}
+      <div className="flex flex-col justify-start min-w-0 flex-1">
+        <span className="text-[10px] font-bold text-retro-secondary tracking-wider uppercase truncate flex items-center gap-1.5">
+          {!isArchived && (
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${inUseQty > 0 ? 'bg-green-500' : 'bg-stone-300'}`}></span>
+          )}
+          {product.brand}
+        </span>
+        <span className="text-sm font-bold font-display text-retro-text leading-snug truncate mt-0.5">
+          {product.name}
+        </span>
+        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+          {!isArchived ? (
+            <span className="text-[11px] font-semibold text-retro-text/60 bg-stone-100 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
+              <span className="flex items-center gap-1" title="未開封">
+                <Package className="w-3 h-3 text-retro-primary" />
+                {unopenedQty}
+              </span>
+              {inUseQty > 0 && (
+                <>
+                  <span className="w-px h-2.5 bg-stone-300"></span>
+                  <span className="flex items-center gap-1" title="使用中">
+                    <PackageOpen className="w-3 h-3 text-emerald-500" />
+                    {inUseQty}
+                  </span>
+                </>
+              )}
+            </span>
+          ) : (
+            <span className="text-[11px] font-semibold text-retro-text/50">
+              {archivedLabel}{archivedDate ? ` · ${archivedDate}` : ''}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Right Circle Expiry Indicator */}
-      <div className="flex items-center gap-2 sm:gap-3 ml-2 flex-shrink-0">
-        <div className="flex flex-col items-center justify-center text-center min-w-[4.5rem]">
+      {!isArchived ? (
+        /* Right Circle Expiry Indicator */
+        <div className="flex flex-col items-center justify-center text-center min-w-[4.25rem] flex-shrink-0">
           <div className="w-12 h-12 rounded-full bg-stone-50 border border-retro-text/5 flex flex-col items-center justify-center">
             {showOpenedDateFallback ? (
               <>
@@ -4454,7 +3341,7 @@ function ProductCard({
               </>
             ) : (
               <>
-                <span className={`text-sm font-bold leading-none ${isUrgent ? 'text-red-500 font-extrabold' : 'text-retro-primary'}`}>
+                <span className={`text-sm font-bold leading-none ${isUrgent ? 'text-retro-danger font-extrabold' : 'text-retro-primary'}`}>
                   {hasAnyExpiry ? minDaysToExpiry : '-'}
                 </span>
                 <span className="text-[8px] text-retro-text/50 font-bold mt-0.5">天到期</span>
@@ -4472,51 +3359,37 @@ function ProductCard({
             </span>
           )}
         </div>
-      </div>
-      {onRestoreMaster && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRestoreMaster(product);
-          }}
-          className={`absolute -top-2 right-8 w-8 h-8 bg-white border border-emerald-200 text-emerald-500 rounded-full flex items-center justify-center transition-all shadow-sm z-10 ${isArchived ? "opacity-100" : "opacity-0 group-hover:opacity-100"} hover:bg-emerald-50 hover:text-emerald-600`}
-          title="還原此紀錄"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
-        </button>
-      )}
-      {onDeleteMaster && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDeleteMaster(product);
-          }}
-          className={`absolute -top-2 -right-2 w-8 h-8 bg-white border border-red-200 text-red-500 rounded-full flex items-center justify-center transition-all shadow-sm z-10 ${isArchived ? "opacity-100" : "opacity-0 group-hover:opacity-100"} hover:bg-red-50 hover:text-red-600`}
-          title="永久刪除此紀錄"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-        </button>
+      ) : (
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {onRestore && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRestore(product);
+              }}
+              className="w-10 h-10 rounded-full flex items-center justify-center text-retro-primary hover:bg-retro-primary/10 transition-colors cursor-pointer"
+              aria-label={`還原「${product.name}」`}
+              title="還原"
+            >
+              <RotateCcw className="w-4.5 h-4.5" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(product);
+              }}
+              className="w-10 h-10 rounded-full flex items-center justify-center text-retro-text/30 hover:text-retro-danger hover:bg-retro-danger/10 transition-colors cursor-pointer"
+              aria-label={`永久刪除「${product.name}」`}
+              title="永久刪除"
+            >
+              <Trash2 className="w-4.5 h-4.5" />
+            </button>
+          )}
+        </div>
       )}
     </div>
-  );
-}
-
-// Inline mini Clock icon
-function ClockIcon({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
-      className={className}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
   );
 }
 
